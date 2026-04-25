@@ -4,7 +4,7 @@ AI Image Caption Pro — entry point.
 Usage:
     python main.py
     # or after PyInstaller packaging:
-    open dist/AI\ Image\ Caption\ Pro.app
+    open "dist/AI Image Caption Pro.app"
 """
 import sys
 from pathlib import Path
