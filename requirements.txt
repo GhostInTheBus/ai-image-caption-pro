@@ -1,0 +1,20 @@
+# PhotoAI Caption Studio — Python dependencies
+# Install with: pip install -r requirements.txt
+#
+# Python 3.11+ recommended (stdlib tomllib used for settings)
+# Python 3.10: also install tomli (listed below, guarded in code)
+
+PyQt6>=6.6.0
+ollama>=0.2.0
+
+# Cloud AI backends — install only what you use
+# pip install google-genai           # Gemini (new SDK — recommended)
+# pip install google-generativeai    # Gemini (old SDK — also supported as fallback)
+# pip install anthropic              # Claude
+# pip install openai                 # OpenAI / ChatGPT
+
+# Optional: required for Python < 3.11 (TOML settings parsing)
+# tomli>=2.0.0
+
+# Optional: for PyInstaller packaging
+# pyinstaller>=6.0.0

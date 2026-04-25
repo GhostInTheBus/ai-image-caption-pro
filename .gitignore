@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.DS_Store
+
+# User settings and job history (machine-local)
+config/settings.toml
+~/.photoai/
+
+# Populated at build time by build_mac.sh / build_linux.sh
+bin/exiftool
+bin/exiftool.exe
+
+# Build artifacts
+*.dmg
+*.tar.gz
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code session files
+.claude/
