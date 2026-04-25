@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build AI Photo Caption Pro for Linux → dist/AIPhotoCaptionPro (single directory)
+# Build AI Image Caption Pro for Linux → dist/AIImageCaptionPro (single directory)
 set -euo pipefail
 
 echo "==> Installing system deps (Debian/Ubuntu)"
@@ -19,7 +19,7 @@ fi
 
 echo "==> Running PyInstaller"
 pyinstaller \
-    --name "AIPhotoCaptionPro" \
+    --name "AIImageCaptionPro" \
     --windowed \
     --onedir \
     --add-data "assets:assets" \
@@ -38,5 +38,5 @@ pyinstaller \
     --exclude-module "numpy" \
     main.py
 
-echo "==> Built: dist/AIPhotoCaptionPro/"
-echo "    Run with: ./dist/AIPhotoCaptionPro/AIPhotoCaptionPro"
+echo "==> Built: dist/AIImageCaptionPro/"
+echo "    Run with: ./dist/AIImageCaptionPro/AIImageCaptionPro"

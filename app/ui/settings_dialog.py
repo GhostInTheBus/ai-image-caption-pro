@@ -79,7 +79,7 @@ def save_settings(s: Settings) -> None:
 class SettingsDialog(QDialog):
     def __init__(self, settings: Settings, available_models: List[str], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("AI Photo Caption Pro — Settings")
+        self.setWindowTitle("AI Image Caption Pro — Settings")
         self.setMinimumWidth(480)
         self.settings = settings
 

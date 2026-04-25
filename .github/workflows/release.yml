@@ -28,8 +28,8 @@ jobs:
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Photo-Caption-Pro-mac
-          path: AI-Photo-Caption-Pro-mac.dmg
+          name: AI-Image-Caption-Pro-mac
+          path: AI-Image-Caption-Pro-mac.dmg
           if-no-files-found: warn
 
   build-linux:
@@ -57,13 +57,13 @@ jobs:
         run: bash build_linux.sh
 
       - name: Tar the dist folder
-        run: tar -czf AI-Photo-Caption-Pro-linux.tar.gz -C dist AIPhotoCaptionPro
+        run: tar -czf AI-Image-Caption-Pro-linux.tar.gz -C dist AIImageCaptionPro
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Photo-Caption-Pro-linux
-          path: AI-Photo-Caption-Pro-linux.tar.gz
+          name: AI-Image-Caption-Pro-linux
+          path: AI-Image-Caption-Pro-linux.tar.gz
 
   release:
     needs: [build-macos, build-linux]
@@ -79,6 +79,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            AI-Photo-Caption-Pro-mac.dmg
-            AI-Photo-Caption-Pro-linux.tar.gz
+            AI-Image-Caption-Pro-mac.dmg
+            AI-Image-Caption-Pro-linux.tar.gz
           generate_release_notes: true

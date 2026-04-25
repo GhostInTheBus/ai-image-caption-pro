@@ -1,5 +1,5 @@
 """
-macOS menu bar / system tray icon for AI Photo Caption Pro.
+macOS menu bar / system tray icon for AI Image Caption Pro.
 
 Provides a persistent entry point in the menu bar so the app is never "lost".
 Clicking the icon shows/hides the floating window.
@@ -20,17 +20,17 @@ class TrayIcon(QObject):
 
         icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
         self._tray = QSystemTrayIcon(icon, parent=self)
-        self._tray.setToolTip("AI Photo Caption Pro")
+        self._tray.setToolTip("AI Image Caption Pro")
 
         menu = QMenu()
 
-        self._toggle_action = QAction("Hide AI Photo Caption Pro")
+        self._toggle_action = QAction("Hide AI Image Caption Pro")
         self._toggle_action.triggered.connect(self._toggle)
         menu.addAction(self._toggle_action)
 
         menu.addSeparator()
 
-        quit_action = QAction("Quit AI Photo Caption Pro")
+        quit_action = QAction("Quit AI Image Caption Pro")
         quit_action.triggered.connect(QApplication.instance().quit)
         menu.addAction(quit_action)
 
@@ -41,7 +41,7 @@ class TrayIcon(QObject):
     # ── Public API ────────────────────────────────────────────────────────────
 
     def set_status(self, text: str) -> None:
-        self._tray.setToolTip(f"AI Photo Caption Pro — {text}")
+        self._tray.setToolTip(f"AI Image Caption Pro — {text}")
 
     def notify(self, title: str, message: str) -> None:
         self._tray.showMessage(
@@ -62,9 +62,9 @@ class TrayIcon(QObject):
     def _toggle(self) -> None:
         if self._window.isVisible():
             self._window.hide()
-            self._toggle_action.setText("Show AI Photo Caption Pro")
+            self._toggle_action.setText("Show AI Image Caption Pro")
         else:
             self._window.show()
             self._window.raise_()
             self._window.activateWindow()
-            self._toggle_action.setText("Hide AI Photo Caption Pro")
+            self._toggle_action.setText("Hide AI Image Caption Pro")

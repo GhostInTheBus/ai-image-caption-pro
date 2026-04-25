@@ -53,7 +53,7 @@ class FloatingWindow(QWidget):
     # ── Window setup ──────────────────────────────────────────────────────────
 
     def _setup_window(self) -> None:
-        self.setWindowTitle("AI Photo Caption Pro")
+        self.setWindowTitle("AI Image Caption Pro")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setAcceptDrops(True)
@@ -125,7 +125,7 @@ class FloatingWindow(QWidget):
         tbl = QHBoxLayout(title_bar)
         tbl.setContentsMargins(8, 0, 8, 0)
 
-        title_lbl = QLabel("📷  AI Photo Caption Pro")
+        title_lbl = QLabel("📷  AI Image Caption Pro")
         title_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #89b4fa;")
         tbl.addWidget(title_lbl)
         tbl.addStretch()

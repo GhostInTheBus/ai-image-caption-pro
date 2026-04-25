@@ -79,46 +79,78 @@ def read_existing_keywords(file_path: Path) -> List[str]:
     return kw
 
 
-# ── Extracting embedded JPEG from RAW ─────────────────────────────────────────
+# ── Extracting / generating a JPEG from RAW ──────────────────────────────────
+
+def _try_exiftool_extract(raw_path: Path, dest: Path) -> bool:
+    """Try extracting embedded JPEG via exiftool. Returns True on success."""
+    for tag in ("-JpgFromRaw", "-PreviewImage", "-LargestImage"):
+        subprocess.run(
+            [_et(), "-b", tag, "-w!", str(dest), str(raw_path)],
+            capture_output=True, text=True, timeout=60,
+        )
+        if dest.exists() and dest.stat().st_size > 10_000:
+            return True
+        if dest.exists():
+            dest.unlink()
+    return False
+
+
+def _try_sips(raw_path: Path, dest: Path, max_px: int = 1920) -> bool:
+    """macOS sips: decode RAW data → JPEG, longest side ≤ max_px. Returns True on success."""
+    try:
+        r = subprocess.run(
+            ["sips", "-s", "format", "jpeg", "-Z", str(max_px), str(raw_path), "--out", str(dest)],
+            capture_output=True, text=True, timeout=120,
+        )
+        return r.returncode == 0 and dest.exists() and dest.stat().st_size > 10_000
+    except FileNotFoundError:
+        return False
+
+
+def _try_dcraw(raw_path: Path, dest: Path) -> bool:
+    """Linux fallback: dcraw → PPM piped through convert. Returns True on success."""
+    try:
+        dcraw = subprocess.run(
+            ["dcraw", "-c", "-w", "-h", str(raw_path)],
+            capture_output=True, timeout=120,
+        )
+        if dcraw.returncode != 0 or not dcraw.stdout:
+            return False
+        convert = subprocess.run(
+            ["convert", "ppm:-", str(dest)],
+            input=dcraw.stdout, capture_output=True, timeout=60,
+        )
+        return convert.returncode == 0 and dest.exists() and dest.stat().st_size > 10_000
+    except FileNotFoundError:
+        return False
+
 
 def extract_preview_jpeg(raw_path: Path, dest_dir: Optional[Path] = None) -> Path:
     """
-    Extract the embedded JPEG preview from a RAW file.
-    Returns the path to the extracted JPEG.
+    Get a JPEG from a RAW file for AI processing.
 
-    Strategy:
-      1. Try -JpgFromRaw (Canon CR3, Nikon NEF, etc.)
-      2. Fall back to -PreviewImage (Sony ARW, others)
-    Raises RuntimeError if neither works.
+    Strategy (in order):
+      1. exiftool -JpgFromRaw / -PreviewImage / -LargestImage (fast, no decode)
+      2. sips (macOS built-in RAW decoder, always works on macOS)
+      3. dcraw + convert (Linux fallback, if both tools are installed)
+
+    The returned JPEG is written to dest_dir and the caller is responsible
+    for deleting it (or use a TemporaryDirectory context).
     """
     dest_dir = dest_dir or Path(tempfile.gettempdir()) / "photoai_previews"
     dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{raw_path.stem}_preview.jpg"
 
-    stem = raw_path.stem
-    dest = dest_dir / f"{stem}_preview.jpg"
-
-    # Try JpgFromRaw first
-    for tag in ("-JpgFromRaw", "-PreviewImage"):
-        result = subprocess.run(
-            [_et(), "-b", tag, "-w!", str(dest), str(raw_path)],
-            capture_output=True, text=True, timeout=60
-        )
-        if dest.exists() and dest.stat().st_size > 1000:
-            return dest
-        if dest.exists():
-            dest.unlink()
-
-    # Last resort: extract largest embedded image
-    result = subprocess.run(
-        [_et(), "-b", "-LargestImage", "-w!", str(dest), str(raw_path)],
-        capture_output=True, text=True, timeout=60
-    )
-    if dest.exists() and dest.stat().st_size > 1000:
+    if _try_exiftool_extract(raw_path, dest):
+        return dest
+    if _try_sips(raw_path, dest):
+        return dest
+    if _try_dcraw(raw_path, dest):
         return dest
 
     raise RuntimeError(
-        f"Could not extract preview JPEG from {raw_path.name}. "
-        f"exiftool stderr: {result.stderr.strip()}"
+        f"Could not generate a JPEG preview from {raw_path.name}. "
+        f"On macOS this should always work via sips — verify the file is a valid RAW."
     )
 
 

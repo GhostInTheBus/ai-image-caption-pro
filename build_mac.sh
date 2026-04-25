@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build AI Photo Caption Pro for macOS → dist/AI Photo Caption Pro.app → AI-Photo-Caption-Pro-mac.dmg
+# Build AI Image Caption Pro for macOS → dist/AI Image Caption Pro.app → AI-Image-Caption-Pro-mac.dmg
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="AI Photo Caption Pro"
-DMG_NAME="AI-Photo-Caption-Pro-mac.dmg"
+APP_NAME="AI Image Caption Pro"
+DMG_NAME="AI-Image-Caption-Pro-mac.dmg"
 
 # Build entirely in /tmp — external volumes cause codesign/xattr failures on macOS Sequoia+
-BUILD_TMP="$(mktemp -d /tmp/aipcp_build.XXXXXX)"
+BUILD_TMP="$(mktemp -d /tmp/aicp_build.XXXXXX)"
 WORK_DIR="$BUILD_TMP/work"
 DIST_DIR="$BUILD_TMP/dist"
 echo "==> Build workspace: $BUILD_TMP"
@@ -27,7 +27,7 @@ cd "$PROJECT_DIR"
 pyinstaller \
     --workpath "$WORK_DIR" \
     --distpath "$DIST_DIR" \
-    AIPhotoCaptionPro.spec
+    AIImageCaptionPro.spec
 
 echo "==> Build complete!"
 echo "==> App location: $DIST_DIR/$APP_NAME.app"
@@ -35,7 +35,7 @@ echo ""
 echo "    To install:  ditto \"$DIST_DIR/$APP_NAME.app\" /Applications/$APP_NAME.app"
 echo "    To test now: open \"$DIST_DIR/$APP_NAME.app\""
 echo ""
-echo "$DIST_DIR/$APP_NAME.app" > /tmp/aipcp_last_build.txt
+echo "$DIST_DIR/$APP_NAME.app" > /tmp/aicp_last_build.txt
 
 echo "==> Creating DMG (requires create-dmg: brew install create-dmg)"
 if command -v create-dmg &>/dev/null; then

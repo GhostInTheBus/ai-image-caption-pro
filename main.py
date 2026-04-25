@@ -1,10 +1,10 @@
 """
-AI Photo Caption Pro — entry point.
+AI Image Caption Pro — entry point.
 
 Usage:
     python main.py
     # or after PyInstaller packaging:
-    open dist/AI\ Photo\ Caption\ Pro.app
+    open dist/AI\ Image\ Caption\ Pro.app
 """
 import sys
 from pathlib import Path
@@ -37,9 +37,9 @@ class PhotoApp(QApplication):
 
 def main() -> None:
     app = PhotoApp(sys.argv)
-    app.setApplicationName("AI Photo Caption Pro")
-    app.setApplicationDisplayName("AI Photo Caption Pro")
-    app.setOrganizationName("AI Photo Caption Pro")
+    app.setApplicationName("AI Image Caption Pro")
+    app.setApplicationDisplayName("AI Image Caption Pro")
+    app.setOrganizationName("AI Image Caption Pro")
     app.setQuitOnLastWindowClosed(False)   # keep alive when window hidden via tray
 
     icon_path = Path(__file__).parent / "assets" / "icon.png"
@@ -56,7 +56,7 @@ def main() -> None:
     window.status_changed.connect(tray.set_status)
     window.batch_finished.connect(
         lambda done, errors: tray.notify(
-            "AI Photo Caption Pro",
+            "AI Image Caption Pro",
             f"{done} file{'s' if done != 1 else ''} captioned"
             + (f", {errors} errors" if errors else ""),
         )

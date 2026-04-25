@@ -1,8 +1,8 @@
-# AI Photo Caption Pro
+# AI Image Caption Pro
 
 **Local AI photo captioning — drag a folder, get IPTC metadata.**
 
-AI Photo Caption Pro is a macOS desktop app that looks at your photos, generates captions and keywords using a local or cloud AI vision model, and writes structured IPTC/XMP metadata directly into your files — the same fields that Lightroom, Capture One, and photo libraries read natively.
+AI Image Caption Pro is a macOS desktop app that looks at your photos, generates captions and keywords using a local or cloud AI vision model, and writes structured IPTC/XMP metadata directly into your files — the same fields that Lightroom, Capture One, and photo libraries read natively.
 
 ---
 
@@ -36,7 +36,7 @@ Cloud backends (Gemini, Claude, OpenAI) require only an API key — no local mod
 
 ### Prebuilt app (recommended)
 
-1. Download `AI-Photo-Caption-Pro-mac.dmg` from the [latest release](../../releases/latest)
+1. Download `AI-Image-Caption-Pro-mac.dmg` from the [latest release](../../releases/latest)
 2. Open the DMG, drag the app to Applications
 3. First launch: right-click → **Open** (app is not notarized — it's open source, build it yourself if you prefer)
 
@@ -187,7 +187,7 @@ assets/                     Icons and images
 bin/                        Bundled exiftool (populated at build time)
 build_mac.sh                PyInstaller macOS build script
 build_linux.sh              PyInstaller Linux build script
-PhotoAI.spec                PyInstaller spec (used by build_mac.sh)
+AIImageCaptionPro.spec                PyInstaller spec (used by build_mac.sh)
 ```
 
 ---
