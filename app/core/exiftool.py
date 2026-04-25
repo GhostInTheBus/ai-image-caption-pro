@@ -82,16 +82,15 @@ def read_existing_keywords(file_path: Path) -> List[str]:
 # ── Extracting / generating a JPEG from RAW ──────────────────────────────────
 
 def _try_exiftool_extract(raw_path: Path, dest: Path) -> bool:
-    """Try extracting embedded JPEG via exiftool. Returns True on success."""
+    """Try extracting embedded JPEG via exiftool stdout. Returns True on success."""
     for tag in ("-JpgFromRaw", "-PreviewImage", "-LargestImage"):
-        subprocess.run(
-            [_et(), "-b", tag, "-w!", str(dest), str(raw_path)],
-            capture_output=True, text=True, timeout=60,
+        result = subprocess.run(
+            [_et(), "-b", tag, str(raw_path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
         )
-        if dest.exists() and dest.stat().st_size > 10_000:
+        if result.returncode == 0 and len(result.stdout) > 10_000:
+            dest.write_bytes(result.stdout)
             return True
-        if dest.exists():
-            dest.unlink()
     return False
 
 
