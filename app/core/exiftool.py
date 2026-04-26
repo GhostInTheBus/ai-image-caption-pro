@@ -227,6 +227,9 @@ def write_iptc(
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if result.returncode != 0:
         raise RuntimeError(f"exiftool write failed: {result.stderr.strip()}")
+    if "1 image files updated" not in result.stdout:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(f"exiftool wrote 0 files to {file_path.name} — {detail}")
 
 
 def verify_write(file_path: Path) -> Dict[str, Any]:
