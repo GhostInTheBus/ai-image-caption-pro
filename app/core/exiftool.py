@@ -188,11 +188,12 @@ def write_iptc(
     Keyword merge:
       - Combines existing_keywords + new keywords, deduplicated, preserving order
     """
-    # Build final caption
+    # Build final caption — AI portion always ends with [ai] footnote
+    ai_caption = f"{caption} [ai]"
     if existing_caption and existing_caption.strip():
-        final_caption = f"{existing_caption.strip()}{append_separator}{caption}"
+        final_caption = f"{existing_caption.strip()}\n\n{ai_caption}"
     else:
-        final_caption = caption
+        final_caption = ai_caption
 
     # Build merged keywords (existing first, then new, deduped, case-insensitive)
     seen: set[str] = set()
@@ -204,9 +205,11 @@ def write_iptc(
             merged_kw.append(kw.strip())
 
     # Build exiftool command
+    # -m: ignore minor errors (e.g. IPTC not supported in some RAW formats) so XMP tags still write
     cmd: List[str] = [
         _et(),
         "-overwrite_original",
+        "-m",
         "-charset", "iptc=UTF8",
         f"-IPTC:Caption-Abstract={final_caption}",
         f"-XMP:Description={final_caption}",
@@ -259,6 +262,7 @@ def write_iptc(
     cmd.append(str(file_path))
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
     if result.returncode != 0:
         raise RuntimeError(f"exiftool write failed: {result.stderr.strip()}")
     if "1 image files updated" not in result.stdout:
@@ -266,6 +270,79 @@ def write_iptc(
         raise RuntimeError(f"exiftool wrote 0 files to {file_path.name} — {detail}")
 
 
+def write_xmp_sidecar(
+    raw_path: Path,
+    caption: str,
+    keywords: List[str],
+    artist: str = "",
+    copyright_notice: str = "",
+) -> Path:
+    """
+    Write a Photo Mechanic / Lightroom-compatible XMP sidecar alongside a RAW file.
+    Returns the sidecar path. Overwrites any existing sidecar.
+
+    Uses exiftool to generate the XMP so the namespace layout, rdf:Alt / rdf:Bag
+    structure, and xpacket encoding are guaranteed to match what PM expects.
+
+    Photo Mechanic reads sidecar .xmp files instantly without needing Cmd+R,
+    unlike embedded RAW XMP which requires a manual metadata refresh.
+    """
+    sidecar = raw_path.with_suffix(".xmp")
+
+    # Seed an empty but valid XMP file so exiftool has something to update.
+    # exiftool cannot create a standalone .xmp from nothing — it needs an existing file.
+    if not sidecar.exists():
+        sidecar.write_text(
+            "<?xpacket begin='\ufeff' id='W5M0MpCehiHzreSzNTczkc9d'?>"
+            "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+            "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'/>"
+            "</x:xmpmeta>"
+            "<?xpacket end='w'?>",
+            encoding="utf-8",
+        )
+
+    # Build the exiftool command targeting the sidecar path directly.
+    cmd: List[str] = [
+        _et(),
+        "-overwrite_original",
+        "-charset", "iptc=UTF8",
+        # Caption → dc:description (PM "Caption" field)
+        f"-XMP-dc:Description={caption}",
+        # Copyright → dc:rights + xmpRights:Marked (PM "Copyright" field)
+    ]
+
+    if copyright_notice:
+        cmd += [
+            f"-XMP-dc:Rights={copyright_notice}",
+            "-XMP-xmpRights:Marked=True",
+        ]
+
+    if artist:
+        cmd.append(f"-XMP-dc:Creator={artist}")
+
+    # Keywords → dc:subject (PM "Keywords" field)
+    for kw in keywords:
+        cmd.append(f"-XMP-dc:Subject={kw}")
+
+    cmd.append(str(sidecar))
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(f"exiftool sidecar write failed: {result.stderr.strip()}")
+
+    return sidecar
+
+
 def verify_write(file_path: Path) -> Dict[str, Any]:
-    """Read back IPTC after write — used for verification/logging."""
-    return read_iptc(file_path)
+    """Read back IPTC and XMP after write — confirms data persisted in either namespace."""
+    result = subprocess.run(
+        [_et(), "-json", "-IPTC:all", "-XMP:all", "-charset", "iptc=UTF8", str(file_path)],
+        capture_output=True, text=True, timeout=30
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return {}
+    try:
+        data = json.loads(result.stdout)
+        return data[0] if data else {}
+    except (json.JSONDecodeError, IndexError):
+        return {}

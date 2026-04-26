@@ -11,7 +11,9 @@ Pipeline per image:
 from __future__ import annotations
 
 import hashlib
+import sys
 import tempfile
+import traceback
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -28,18 +30,21 @@ RAW_EXTENSIONS = {
     ".dng", ".raf", ".orf", ".rw2",
 }
 JPEG_EXTENSIONS = {".jpg", ".jpeg"}
-IMAGE_EXTENSIONS = RAW_EXTENSIONS | JPEG_EXTENSIONS
+PSD_EXTENSIONS = {".psd", ".psb"}
+IMAGE_EXTENSIONS = RAW_EXTENSIONS | JPEG_EXTENSIONS | PSD_EXTENSIONS
 
 # Synology metadata dirs to skip
 SKIP_DIRS = {"@eaDir", "#recycle", ".Spotlight-V100", ".Trashes"}
 
 
 def scan_folder(folder: Path, recursive: bool = False) -> List[Path]:
-    """Return all image files in folder, skipping Synology metadata dirs."""
+    """Return all image files in folder, skipping Synology metadata dirs and macOS resource forks."""
     files: List[Path] = []
     glob = "**/*" if recursive else "*"
     for path in sorted(folder.glob(glob)):
         if any(skip in path.parts for skip in SKIP_DIRS):
+            continue
+        if path.name.startswith("._"):  # macOS AppleDouble resource fork files
             continue
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
             files.append(path)
@@ -79,12 +84,14 @@ class BatchWorker(QObject):
         folder: Path,
         settings: Settings,
         resume: bool = False,
+        files: Optional[List[Path]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self.folder = folder
         self.settings = settings
         self.resume = resume
+        self._files = files  # explicit file list; if set, skips folder scan
         self._stop_requested = False
         self._pause_requested = False
 
@@ -104,12 +111,15 @@ class BatchWorker(QObject):
 
         batch_id = make_batch_id(self.folder)
 
-        # Scan folder and register all jobs
-        self.status_msg.emit(f"Scanning {self.folder.name}…")
-        image_files = scan_folder(self.folder, self.settings.recursive_scan)
+        if self._files is not None:
+            image_files = self._files
+            self.status_msg.emit(f"Processing {len(image_files)} file(s)…")
+        else:
+            self.status_msg.emit(f"Scanning {self.folder.name}…")
+            image_files = scan_folder(self.folder, self.settings.recursive_scan)
 
         if not image_files:
-            self.status_msg.emit("No image files found in folder.")
+            self.status_msg.emit("No image files found.")
             self.batch_complete.emit(0, 0, 0, 0)
             return
 
@@ -154,6 +164,10 @@ class BatchWorker(QObject):
                     self.job_done.emit(job.display_name)
                 except Exception as e:
                     msg = str(e)
+                    # Print full stack trace to terminal so dev.sh output shows root cause
+                    print(f"\n[ERROR] {job.display_name}: {msg}", file=sys.stderr)
+                    traceback.print_exc(file=sys.stderr)
+                    print("", file=sys.stderr, flush=True)
                     job_db.mark_error(job.job_id, msg)
                     errors += 1
                     self.job_error.emit(job.display_name, msg)
@@ -173,17 +187,34 @@ class BatchWorker(QObject):
         s = self.settings
 
         # Step 1: get preview JPEG
-        if job.is_raw:
+        self.status_msg.emit(f"[1/4] Extracting preview — {job.display_name}")
+        if job.needs_preview:
             preview_path = exiftool.extract_preview_jpeg(job.file_path, tmp_dir)
         else:
-            preview_path = job.file_path   # JPEGs go straight to Ollama
+            preview_path = job.file_path   # JPEGs go straight to AI
+        self.status_msg.emit(f"[2/4] Reading existing metadata — {job.display_name}")
 
         # Step 2: read existing metadata
         existing_caption = exiftool.read_existing_caption(job.file_path)
         existing_keywords = exiftool.read_existing_keywords(job.file_path)
 
-        # Step 3: generate caption
-        caption, keywords = generate_caption(image_path=preview_path, settings=s)
+        # Step 3: generate caption — load global brief + per-folder context.md
+        self.status_msg.emit(f"[3/4] Sending to AI ({s.backend}) — {job.display_name}")
+        context_parts: list[str] = []
+        global_brief = getattr(s, "context_file", "")
+        if global_brief:
+            p = Path(global_brief)
+            if p.exists():
+                context_parts.append(p.read_text(encoding="utf-8"))
+        folder_brief = job.file_path.parent / "context.md"
+        if folder_brief.exists():
+            context_parts.append(folder_brief.read_text(encoding="utf-8"))
+        context_md = "\n\n---\n\n".join(context_parts)
+
+        caption, keywords = generate_caption(
+            image_path=preview_path, settings=s, context_md=context_md
+        )
+        self.status_msg.emit(f"[4/4] Writing metadata — {job.display_name}")
 
         # Step 4: write IPTC to original file
         amend = getattr(s, "caption_mode", "amend") == "amend"
@@ -215,8 +246,49 @@ class BatchWorker(QObject):
             **iptc_kwargs,
         )
 
-        # If a sidecar JPG exists alongside a RAW, write to that too
+        # Verify the write actually persisted — reads back the file immediately after
+        verified = exiftool.verify_write(job.file_path)
+        # XMP fields are used for RAW formats that don't support IPTC natively
+        written_caption = (
+            verified.get("Caption-Abstract")
+            or verified.get("IPTC:Caption-Abstract")
+            or verified.get("Description")
+            or verified.get("XMP:Description")
+            or ""
+        )
+        written_kw = (
+            verified.get("Keywords")
+            or verified.get("IPTC:Keywords")
+            or verified.get("Subject")
+            or verified.get("XMP:Subject")
+            or []
+        )
+        if isinstance(written_kw, str):
+            written_kw = [written_kw]
+        if not written_caption.strip() and not written_kw:
+            raise RuntimeError(
+                f"exiftool reported success but no caption or keywords found in "
+                f"{job.file_path.name} after write. File may be read-only or on an "
+                f"unsupported filesystem."
+            )
+        kw_count = len(written_kw)
+        self.status_msg.emit(
+            f"✓ {job.display_name}: {len(written_caption)} char caption, {kw_count} keyword(s)"
+        )
+
+        # Write XMP sidecar for RAW files — Photo Mechanic reads these instantly
+        # without needing a manual Cmd+R metadata refresh (embedded RAW XMP requires it)
         if job.is_raw:
+            exiftool.write_xmp_sidecar(
+                raw_path=job.file_path,
+                caption=written_caption,   # use verified caption (includes existing + [ai])
+                keywords=keywords,
+                artist=s.artist_name,
+                copyright_notice=s.copyright_year_notice(),
+            )
+
+        # If a sidecar JPG exists alongside a RAW or PSD, write to that too
+        if job.needs_preview:
             for ext in (".jpg", ".JPG", ".jpeg", ".JPEG"):
                 sidecar = job.file_path.with_suffix(ext)
                 if sidecar.exists():

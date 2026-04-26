@@ -42,6 +42,15 @@ class ImageJob:
         }
 
     @property
+    def is_psd(self) -> bool:
+        return self.file_path.suffix.lower() in {".psd", ".psb"}
+
+    @property
+    def needs_preview(self) -> bool:
+        """True for any format that requires preview extraction before AI captioning."""
+        return self.is_raw or self.is_psd
+
+    @property
     def display_name(self) -> str:
         return self.file_path.name
 
@@ -112,10 +121,14 @@ class Settings:
 
     # Context hint — appended to the AI prompt for every image in the batch
     context_hint: str = ""             # e.g. "Shot in Kyoto, Japan, spring 2024"
+    context_file: str = ""             # path to a global .md brief (style, gear, voice)
 
     caption_mode: str = "amend"          # "amend" = append to existing | "replace" = overwrite
     append_separator: str = "\n\n"      # separator when appending AI caption to existing
-    max_keywords: int = 10
+    max_keywords: int = 10              # legacy — now derived from keyword_verbosity internally
+    keyword_verbosity: int = 3          # 1=minimal … 5=exhaustive (controls LLM keyword count range)
+    description_verbosity: int = 3      # 1=brief … 5=exhaustive (controls LLM sentence count)
+    user_keywords: str = ""             # comma-separated seeds always merged into output
     recursive_scan: bool = False        # scan subfolders
     skip_already_done: bool = True      # skip files already processed in this session
 

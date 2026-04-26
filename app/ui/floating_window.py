@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from app.core.agent import BatchWorker, make_batch_id, scan_folder
+from app.core.agent import BatchWorker, IMAGE_EXTENSIONS, make_batch_id, scan_folder
 from app.core.captioner import list_available_models
 from app.models import Settings
 from app.ui.progress_panel import ProgressPanel
@@ -163,7 +163,7 @@ class FloatingWindow(QWidget):
         icon_lbl.setStyleSheet("font-size: 48px;")
         layout.addWidget(icon_lbl)
 
-        hint = QLabel("Drop a photo folder here")
+        hint = QLabel("Drop photos or a folder here")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: #888; font-size: 14px;")
         layout.addWidget(hint)
@@ -218,15 +218,15 @@ class FloatingWindow(QWidget):
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if urls and Path(urls[0].toLocalFile()).is_dir():
-                event.acceptProposedAction()
-                self.setStyleSheet(self.styleSheet().replace("#1e1e2e", "#1a1a2e"))
-                return
+            for url in event.mimeData().urls():
+                p = Path(url.toLocalFile())
+                if p.is_dir() or (p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS):
+                    event.acceptProposedAction()
+                    self.setStyleSheet(self.styleSheet().replace("#1e1e2e", "#1a1a2e"))
+                    return
         event.ignore()
 
     def dragLeaveEvent(self, event) -> None:
-        # Restore normal background
         self.setStyleSheet(self.styleSheet().replace("#1a1a2e", "#1e1e2e"))
 
     def dropEvent(self, event: QDropEvent) -> None:
@@ -234,21 +234,44 @@ class FloatingWindow(QWidget):
         urls = event.mimeData().urls()
         if not urls:
             return
-        folder = Path(urls[0].toLocalFile())
-        if not folder.is_dir():
-            return
-        self._start_batch(folder)
+
+        # Separate folders from individual image files
+        folders: list[Path] = []
+        loose_files: list[Path] = []
+        for url in urls:
+            p = Path(url.toLocalFile())
+            if p.is_dir():
+                folders.append(p)
+            elif p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS:
+                loose_files.append(p)
+
+        if folders:
+            # Folder drop: use first folder (existing behaviour)
+            self._start_batch(folders[0])
+        elif loose_files:
+            # Individual file(s): use the parent dir for display/batch-ID purposes
+            folder = loose_files[0].parent
+            self._start_batch(folder, files=loose_files)
 
     # ── Batch lifecycle ───────────────────────────────────────────────────────
 
-    def _start_batch(self, folder: Path, force: bool = False) -> None:
+    def _start_batch(
+        self,
+        folder: Path,
+        force: bool = False,
+        files: Optional[list[Path]] = None,
+    ) -> None:
         if self._thread and self._thread.isRunning():
             QMessageBox.information(self, "Busy", "A batch is already running. Stop it first.")
             return
 
-        # Quick scan to get file count for progress panel header
-        files = scan_folder(folder, self.settings.recursive_scan)
-        if not files:
+        # Resolve the file list (explicit drop or folder scan)
+        if files is not None:
+            file_list = files
+        else:
+            file_list = scan_folder(folder, self.settings.recursive_scan)
+
+        if not file_list:
             QMessageBox.warning(self, "No Images", f"No image files found in:\n{folder}")
             return
 
@@ -260,23 +283,23 @@ class FloatingWindow(QWidget):
             batch_id = make_batch_id(folder)
             all_done = all(
                 is_done(ImageJob(file_path=f, batch_id=batch_id).job_id)
-                for f in files
+                for f in file_list
             )
             if all_done:
                 reply = QMessageBox.question(
                     self, "Already Processed",
-                    f"All {len(files)} files in '{folder.name}' were already captioned.\n\n"
+                    f"All {len(file_list)} files in '{folder.name}' were already captioned.\n\n"
                     "Reprocess them anyway?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 )
                 if reply == QMessageBox.StandardButton.Yes:
-                    self._start_batch(folder, force=True)
+                    self._start_batch(folder, force=True, files=files)
                 return
 
         # Build progress panel
         self._progress_panel = ProgressPanel(
             folder_name=folder.name,
-            total=len(files),
+            total=len(file_list),
             parent=self,
         )
         self._progress_panel.pause_clicked.connect(self._toggle_pause)
@@ -284,7 +307,7 @@ class FloatingWindow(QWidget):
         self._progress_panel.close_clicked.connect(self._collapse_to_drop_zone)
 
         # Pre-populate file rows
-        for f in files:
+        for f in file_list:
             self._progress_panel.add_file(f.name)
 
         # Swap to progress page
@@ -300,7 +323,7 @@ class FloatingWindow(QWidget):
             reset_batch_for_reprocess(make_batch_id(folder))
 
         # Worker thread
-        self._worker = BatchWorker(folder=folder, settings=self.settings)
+        self._worker = BatchWorker(folder=folder, settings=self.settings, files=files)
         self._thread = QThread()
         self._worker.moveToThread(self._thread)
 

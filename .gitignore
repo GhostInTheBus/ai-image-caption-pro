@@ -27,3 +27,7 @@ venv/
 
 # Claude Code session files
 .claude/
+
+# Synology NAS metadata directories (appear when repo lives on a NAS share)
+@eaDir/
+**/@eaDir/

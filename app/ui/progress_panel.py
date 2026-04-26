@@ -58,6 +58,10 @@ class FileRow(QWidget):
         self.icon_label.setStyleSheet("color: #f44336;")
         if msg:
             self.name_label.setToolTip(msg)
+            # Show abbreviated error inline so it's visible without hovering
+            short = msg.split("\n")[0][:80]
+            self.name_label.setText(f"{self.name_label.text()}  — {short}")
+            self.name_label.setStyleSheet("color: #f44336; font-size: 11px;")
 
     def set_skipped(self) -> None:
         self.icon_label.setText(ICON_SKIPPED)

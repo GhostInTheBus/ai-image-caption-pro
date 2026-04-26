@@ -11,7 +11,7 @@ from typing import List
 from PyQt6.QtCore import Qt
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
+    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QCheckBox, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QSlider,
     QStackedWidget, QVBoxLayout, QWidget,
@@ -211,42 +211,113 @@ class SettingsDialog(QDialog):
 
         self.backend_combo.currentIndexChanged.connect(self._backend_stack.setCurrentIndex)
 
-        # Keywords (shared across all backends)
-        kw_form = QFormLayout()
-        kw_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        kw_widget = QWidget()
-        kw_h = QHBoxLayout(kw_widget)
-        kw_h.setContentsMargins(0, 0, 0, 0)
-        kw_h.setSpacing(8)
-        self.kw_slider = QSlider(Qt.Orientation.Horizontal)
-        self.kw_slider.setRange(3, 30)
-        self.kw_slider.setValue(settings.max_keywords)
-        self.kw_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.kw_slider.setTickInterval(5)
-        self._kw_val_label = QLabel(str(settings.max_keywords))
-        self._kw_val_label.setFixedWidth(28)
-        self._kw_val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.kw_slider.valueChanged.connect(lambda v: self._kw_val_label.setText(str(v)))
-        kw_h.addWidget(self.kw_slider, 1)
-        kw_h.addWidget(self._kw_val_label)
-        kw_form.addRow("Max keywords:", kw_widget)
-        ai_layout.addLayout(kw_form)
+        # Verbosity sliders (shared across all backends)
+        verb_form = QFormLayout()
+        verb_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        _KW_LABELS = {1: "Minimal (2–4)", 2: "Concise (4–6)", 3: "Standard (5–8)",
+                      4: "Rich (8–12)", 5: "Exhaustive (12–20)"}
+        _DESC_LABELS = {1: "Brief (1 sentence)", 2: "Concise (1–2)", 3: "Standard (2–4)",
+                        4: "Detailed (4–6)", 5: "Exhaustive (6–8)"}
+
+        # Keyword verbosity
+        kw_verb_widget = QWidget()
+        kw_verb_h = QHBoxLayout(kw_verb_widget)
+        kw_verb_h.setContentsMargins(0, 0, 0, 0)
+        kw_verb_h.setSpacing(8)
+        self.kw_verb_slider = QSlider(Qt.Orientation.Horizontal)
+        self.kw_verb_slider.setRange(1, 5)
+        self.kw_verb_slider.setValue(getattr(settings, "keyword_verbosity", 3))
+        self.kw_verb_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.kw_verb_slider.setTickInterval(1)
+        self._kw_verb_label = QLabel(_KW_LABELS[self.kw_verb_slider.value()])
+        self._kw_verb_label.setMinimumWidth(140)
+        self.kw_verb_slider.valueChanged.connect(
+            lambda v: self._kw_verb_label.setText(_KW_LABELS[v])
+        )
+        kw_verb_h.addWidget(self.kw_verb_slider, 1)
+        kw_verb_h.addWidget(self._kw_verb_label)
+        verb_form.addRow("Keyword detail:", kw_verb_widget)
+
+        # Description verbosity
+        desc_verb_widget = QWidget()
+        desc_verb_h = QHBoxLayout(desc_verb_widget)
+        desc_verb_h.setContentsMargins(0, 0, 0, 0)
+        desc_verb_h.setSpacing(8)
+        self.desc_verb_slider = QSlider(Qt.Orientation.Horizontal)
+        self.desc_verb_slider.setRange(1, 5)
+        self.desc_verb_slider.setValue(getattr(settings, "description_verbosity", 3))
+        self.desc_verb_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.desc_verb_slider.setTickInterval(1)
+        self._desc_verb_label = QLabel(_DESC_LABELS[self.desc_verb_slider.value()])
+        self._desc_verb_label.setMinimumWidth(140)
+        self.desc_verb_slider.valueChanged.connect(
+            lambda v: self._desc_verb_label.setText(_DESC_LABELS[v])
+        )
+        desc_verb_h.addWidget(self.desc_verb_slider, 1)
+        desc_verb_h.addWidget(self._desc_verb_label)
+        verb_form.addRow("Description length:", desc_verb_widget)
+
+        ai_layout.addLayout(verb_form)
 
         layout.addWidget(ai_group)
 
-        # ── Context hint ──────────────────────────────────────────────────────
+        # ── Context / Brief ───────────────────────────────────────────────────
         ctx_group = QGroupBox("Context (optional — sent to AI with every caption request)")
         ctx_layout = QVBoxLayout(ctx_group)
+        ctx_form = QFormLayout()
+        ctx_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        # Global AI brief (.md file)
+        brief_widget = QWidget()
+        brief_h = QHBoxLayout(brief_widget)
+        brief_h.setContentsMargins(0, 0, 0, 0)
+        brief_h.setSpacing(6)
+        self.context_file_edit = QLineEdit(getattr(settings, "context_file", ""))
+        self.context_file_edit.setPlaceholderText("Path to your .md brief file (optional)")
+        brief_browse = QPushButton("Browse…")
+        brief_browse.setFixedWidth(72)
+        brief_browse.clicked.connect(self._browse_context_file)
+        brief_clear = QPushButton("✕")
+        brief_clear.setFixedWidth(28)
+        brief_clear.setToolTip("Clear brief file")
+        brief_clear.clicked.connect(lambda: self.context_file_edit.clear())
+        brief_h.addWidget(self.context_file_edit, 1)
+        brief_h.addWidget(brief_browse)
+        brief_h.addWidget(brief_clear)
+        ctx_form.addRow("AI brief (.md):", brief_widget)
+
+        brief_hint = QLabel(
+            "Write a .md file describing your photography style, gear, subjects, and vocabulary. "
+            "Drop a context.md in any shoot folder to override per-folder."
+        )
+        brief_hint.setWordWrap(True)
+        brief_hint.setStyleSheet("color: #888; font-size: 11px;")
+        ctx_form.addRow("", brief_hint)
+
+        ctx_layout.addLayout(ctx_form)
+
+        # Quick context hint
         self.context_edit = QPlainTextEdit()
         self.context_edit.setPlainText(settings.context_hint)
         self.context_edit.setPlaceholderText(
-            "Describe the shoot: location, subjects, event, style.\n"
-            "e.g. Wedding at Waimea Valley, Oahu. Ceremony at the waterfall.\n"
-            "Couple: Marcus and Lena. Late afternoon golden hour light."
+            "Quick shoot context: location, subjects, event, style.\n"
+            "e.g. Wedding at Waimea Valley, Oahu. Late afternoon golden hour."
         )
-        self.context_edit.setMinimumHeight(90)
-        self.context_edit.setMaximumHeight(160)
+        self.context_edit.setMinimumHeight(70)
+        self.context_edit.setMaximumHeight(120)
+        ctx_layout.addWidget(QLabel("Quick context hint:"))
         ctx_layout.addWidget(self.context_edit)
+
+        kw_form = QFormLayout()
+        kw_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self.user_kw_edit = QLineEdit(getattr(settings, "user_keywords", ""))
+        self.user_kw_edit.setPlaceholderText(
+            "e.g.  diamond head, golden hour, surf photography"
+        )
+        kw_form.addRow("Always include keywords:", self.user_kw_edit)
+        ctx_layout.addLayout(kw_form)
+
         layout.addWidget(ctx_group)
 
         # ── Behaviour ─────────────────────────────────────────────────────────
@@ -371,6 +442,16 @@ class SettingsDialog(QDialog):
 
         return panel
 
+    # ── Browse for context .md file ───────────────────────────────────────────
+
+    def _browse_context_file(self) -> None:
+        start = str(Path(self.context_file_edit.text()).parent) if self.context_file_edit.text() else str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select AI Brief File", start, "Markdown files (*.md);;All files (*)"
+        )
+        if path:
+            self.context_file_edit.setText(path)
+
     # ── Refresh Ollama models ─────────────────────────────────────────────────
 
     def _refresh_models(self) -> None:
@@ -407,9 +488,12 @@ class SettingsDialog(QDialog):
         self.settings.contact_email          = self.contact_email_edit.text().strip()
         self.settings.contact_phone          = self.contact_phone_edit.text().strip()
         self.settings.contact_url            = self.contact_url_edit.text().strip()
-        self.settings.context_hint     = self.context_edit.toPlainText().strip()
-        self.settings.max_keywords     = self.kw_slider.value()
-        self.settings.caption_mode      = self.caption_mode_combo.currentData()
+        self.settings.context_hint           = self.context_edit.toPlainText().strip()
+        self.settings.context_file           = self.context_file_edit.text().strip()
+        self.settings.user_keywords          = self.user_kw_edit.text().strip()
+        self.settings.keyword_verbosity      = self.kw_verb_slider.value()
+        self.settings.description_verbosity  = self.desc_verb_slider.value()
+        self.settings.caption_mode           = self.caption_mode_combo.currentData()
         self.settings.recursive_scan   = self.recursive_check.isChecked()
         self.settings.skip_already_done = self.skip_done_check.isChecked()
 

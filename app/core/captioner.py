@@ -18,30 +18,25 @@ from typing import List, Optional, Tuple
 
 import ollama
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
+# ── Verbosity tables ──────────────────────────────────────────────────────────
 
-CAPTION_PROMPT = """You are a professional photo archivist building a long-term searchable image archive. Study this photograph carefully — foreground AND background — then respond ONLY with a valid JSON object. No markdown, no code fences, just raw JSON.
-
-{
-  "caption": "...",
-  "keywords": ["...", "..."]
+# (keyword_range_text, max_keywords_hard_cap)
+_KW_VERBOSITY: dict[int, tuple[str, int]] = {
+    1: ("2–4 keywords only — the single most specific identifiers", 4),
+    2: ("4–6 keywords", 6),
+    3: ("5–8 keywords", 8),
+    4: ("8–12 keywords", 12),
+    5: ("12–20 keywords, covering every identifiable specific detail", 20),
 }
 
-CAPTION RULES
-Write 2–4 natural, readable sentences as a knowledgeable observer would describe the image to someone who hasn't seen it. Cover what is in the foreground, what is visible in the background, the quality of light, and any detail that gives the image character. Name specific things you can identify with confidence. Do NOT start with "A photo of", "An image of", or "This image shows". Do NOT infer purpose, occasion, or relationships — no "vacation", "family outing", "tourist", "celebration", "wedding" — unless a sign or banner in the frame explicitly says so. Describe people by what they are doing and wearing, not who they might be or why they are there.
-
-KEYWORD RULES — 3 to 7 keywords only
-Keywords must be specific and high-signal. Ask yourself: would this keyword meaningfully narrow a search, or is it so common it could describe ten thousand photos?
-
-SCAN THE BACKGROUND: Actively look for geographic landmarks, named monuments, distinctive architecture, coastline formations, volcanic features, city skylines. If you can identify something with HIGH CONFIDENCE, include it by name (e.g. "Diamond Head crater", "Golden Gate Bridge", "Makapuu lighthouse"). If you are not certain, describe it generically instead ("volcanic crater", "suspension bridge") — do NOT guess proper names.
-
-BANNED — never use these or any term equally broad:
-water, ocean, sea, lake, river, sky, cloud, sun, tree, plant, flower, grass, ground, rock, stone, sand, beach, road, path, street, building, structure, wall, floor, ceiling, light, shadow, outdoor, indoor, scene, view, background, foreground, landscape, nature, color, white, black, blue, green, red, yellow, beautiful, stunning, amazing, photo, image, picture, camera
-
-GOOD examples: "Diamond Head crater", "long-exposure waterfall", "taro lo'i", "lava bench", "outrigger canoe", "monsoon shelf cloud", "wet-plate portrait", "brutalist facade", "golden-hour sidelight", "aerial perspective"
-BAD examples: "beach", "water", "blue sky", "palm tree", "mountain", "building", "landscape", "nature"
-
-Use lowercase. Prefer two-word specific phrases over single generic words."""
+# sentence-count instruction injected into the caption rule
+_DESC_VERBOSITY: dict[int, str] = {
+    1: "1 concise sentence",
+    2: "1–2 sentences",
+    3: "2–4 natural, readable sentences",
+    4: "4–6 sentences",
+    5: "6–8 sentences with thorough detail — foreground, background, light quality, texture, and any distinguishing character",
+}
 
 
 # ── Curated model lists per cloud backend ─────────────────────────────────────
@@ -91,50 +86,142 @@ def check_ollama_available(host: str = "http://localhost:11434") -> bool:
 
 # ── Main dispatch ─────────────────────────────────────────────────────────────
 
-def _build_prompt(context_hint: str) -> str:
-    """Prepend optional user context so the model sees it before any constraints."""
-    if not context_hint or not context_hint.strip():
-        return CAPTION_PROMPT
-    header = (
-        f"SCENE LOCATION / PHOTOGRAPHER CONTEXT: {context_hint.strip()}\n"
-        f"This tells you where and when these photos were taken. Use it to:\n"
-        f"- Actively look in the background for any landmarks, locations, or features mentioned above\n"
-        f"- If you can see a named landmark (e.g. 'Diamond Head crater'), name it in the caption and as a keyword\n"
-        f"- Include location-specific terms that match what you can visually confirm\n"
-        f"Context helps you CONFIRM — not fabricate. Only name things you can see.\n\n"
+def _build_prompt(
+    context_hint: str = "",
+    keyword_verbosity: int = 3,
+    description_verbosity: int = 3,
+    user_keywords: str = "",
+    context_md: str = "",
+) -> str:
+    """Build the full prompt, injecting verbosity rules and optional context/seeds."""
+    kw_rule, _ = _KW_VERBOSITY.get(keyword_verbosity, _KW_VERBOSITY[3])
+    desc_rule   = _DESC_VERBOSITY.get(description_verbosity, _DESC_VERBOSITY[3])
+
+    sections: List[str] = []
+
+    # Photographer's brief (.md file — richest context, goes first)
+    if context_md and context_md.strip():
+        sections.append(
+            f"PHOTOGRAPHER'S BRIEF — read this carefully before captioning. "
+            f"Use it to deeply inform your vocabulary, style, named subjects, and keywords:\n\n"
+            f"{context_md.strip()}"
+        )
+
+    # Optional context header
+    if context_hint and context_hint.strip():
+        sections.append(
+            f"SCENE LOCATION / PHOTOGRAPHER CONTEXT: {context_hint.strip()}\n"
+            f"This tells you where and when these photos were taken. Use it to:\n"
+            f"- Actively look in the background for any landmarks, locations, or features mentioned above\n"
+            f"- If you can see a named landmark (e.g. 'Diamond Head crater'), name it in the caption and as a keyword\n"
+            f"- Include location-specific terms that match what you can visually confirm\n"
+            f"Context helps you CONFIRM — not fabricate. Only name things you can see."
+        )
+
+    # Optional seed-keyword section
+    if user_keywords and user_keywords.strip():
+        seeds = [k.strip() for k in user_keywords.split(",") if k.strip()]
+        if seeds:
+            seed_list = ", ".join(f'"{s}"' for s in seeds)
+            sections.append(
+                f"REQUIRED KEYWORDS — provided by the photographer:\n"
+                f"You MUST include ALL of the following in your keywords output, verbatim: {seed_list}\n"
+                f"Add them alongside your own keywords — do not replace your analysis with only these."
+            )
+
+    # Core prompt (verbosity injected)
+    core = (
+        "You are a professional photo archivist building a long-term searchable image archive. "
+        "Study this photograph carefully — foreground AND background — then respond ONLY with a valid JSON object. "
+        "No markdown, no code fences, just raw JSON.\n\n"
+        '{\n  "caption": "...",\n  "keywords": ["...", "..."]\n}\n\n'
+        "CAPTION RULES\n"
+        f"Write {desc_rule} as a knowledgeable observer would describe the image to someone who hasn't seen it. "
+        "Cover what is in the foreground, what is visible in the background, the quality of light, and any detail that gives the image character. "
+        "Name specific things you can identify with confidence. "
+        'Do NOT start with "A photo of", "An image of", or "This image shows". '
+        'Do NOT infer purpose, occasion, or relationships — no "vacation", "family outing", "tourist", "celebration", "wedding" — '
+        "unless a sign or banner in the frame explicitly says so. "
+        "Describe people by what they are doing and wearing, not who they might be or why they are there.\n\n"
+        f"KEYWORD RULES — {kw_rule}\n"
+        "Keywords must be specific and high-signal. Ask yourself: would this keyword meaningfully narrow a search, "
+        "or is it so common it could describe ten thousand photos?\n\n"
+        "SCAN THE BACKGROUND: Actively look for geographic landmarks, named monuments, distinctive architecture, "
+        "coastline formations, volcanic features, city skylines. If you can identify something with HIGH CONFIDENCE, "
+        'include it by name (e.g. "Diamond Head crater", "Golden Gate Bridge", "Makapuu lighthouse"). '
+        'If you are not certain, describe it generically instead ("volcanic crater", "suspension bridge") — do NOT guess proper names.\n\n'
+        "BANNED — never use these or any term equally broad:\n"
+        "water, ocean, sea, lake, river, sky, cloud, sun, tree, plant, flower, grass, ground, rock, stone, sand, beach, "
+        "road, path, street, building, structure, wall, floor, ceiling, light, shadow, outdoor, indoor, scene, view, "
+        "background, foreground, landscape, nature, color, white, black, blue, green, red, yellow, beautiful, stunning, "
+        "amazing, photo, image, picture, camera\n\n"
+        'GOOD examples: "Diamond Head crater", "long-exposure waterfall", "taro lo\'i", "lava bench", "outrigger canoe", '
+        '"monsoon shelf cloud", "wet-plate portrait", "brutalist facade", "golden-hour sidelight", "aerial perspective"\n'
+        'BAD examples: "beach", "water", "blue sky", "palm tree", "mountain", "building", "landscape", "nature"\n\n'
+        "Use lowercase. Prefer two-word specific phrases over single generic words."
     )
-    return header + CAPTION_PROMPT
+    sections.append(core)
+    return "\n\n".join(sections)
+
+
+def _merge_user_keywords(ai_keywords: List[str], user_kw_str: str) -> List[str]:
+    """Prepend user seed keywords to AI keywords, deduplicating case-insensitively."""
+    if not user_kw_str or not user_kw_str.strip():
+        return ai_keywords
+    seeds = [k.strip() for k in user_kw_str.split(",") if k.strip()]
+    seen: set[str] = set()
+    merged: List[str] = []
+    for kw in seeds + ai_keywords:
+        lower = kw.lower()
+        if lower not in seen:
+            seen.add(lower)
+            merged.append(kw)
+    return merged
 
 
 def generate_caption(
     image_path: Path,
     settings,
     retries: int = 2,
+    context_md: str = "",
 ) -> Tuple[str, List[str]]:
     """
     Generate a caption and keywords for image_path using the backend
     configured in settings. Raises RuntimeError on failure.
     """
-    backend = getattr(settings, "backend", "ollama")
-    max_kw  = getattr(settings, "max_keywords", 10)
-    prompt  = _build_prompt(getattr(settings, "context_hint", ""))
+    backend   = getattr(settings, "backend", "ollama")
+    kw_verb   = getattr(settings, "keyword_verbosity", 3)
+    desc_verb = getattr(settings, "description_verbosity", 3)
+    user_kw   = getattr(settings, "user_keywords", "")
+    _, max_kw = _KW_VERBOSITY.get(kw_verb, _KW_VERBOSITY[3])
+    prompt    = _build_prompt(
+        context_hint=getattr(settings, "context_hint", ""),
+        keyword_verbosity=kw_verb,
+        description_verbosity=desc_verb,
+        user_keywords=user_kw,
+        context_md=context_md,
+    )
 
     if backend == "gemini":
-        return _generate_gemini(
+        caption, keywords = _generate_gemini(
             image_path, settings.gemini_api_key, settings.gemini_model, max_kw, retries, prompt
         )
     elif backend == "claude":
-        return _generate_claude(
+        caption, keywords = _generate_claude(
             image_path, settings.claude_api_key, settings.claude_model, max_kw, retries, prompt
         )
     elif backend == "openai":
-        return _generate_openai(
+        caption, keywords = _generate_openai(
             image_path, settings.openai_api_key, settings.openai_model, max_kw, retries, prompt
         )
     else:
-        return _generate_ollama(
+        caption, keywords = _generate_ollama(
             image_path, settings.ollama_host, settings.ollama_model, max_kw, retries, prompt
         )
+
+    # Always guarantee user seed keywords appear in the output
+    keywords = _merge_user_keywords(keywords, user_kw)
+    return caption, keywords
 
 
 # ── Ollama (local) ────────────────────────────────────────────────────────────
