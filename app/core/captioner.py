@@ -150,14 +150,17 @@ def _build_prompt(
         "coastline formations, volcanic features, city skylines. If you can identify something with HIGH CONFIDENCE, "
         'include it by name (e.g. "Diamond Head crater", "Golden Gate Bridge", "Makapuu lighthouse"). '
         'If you are not certain, describe it generically instead ("volcanic crater", "suspension bridge") — do NOT guess proper names.\n\n'
-        "BANNED — never use these or any term equally broad:\n"
-        "water, ocean, sea, lake, river, sky, cloud, sun, tree, plant, flower, grass, ground, rock, stone, sand, beach, "
-        "road, path, street, building, structure, wall, floor, ceiling, light, shadow, outdoor, indoor, scene, view, "
-        "background, foreground, landscape, nature, color, white, black, blue, green, red, yellow, beautiful, stunning, "
-        "amazing, photo, image, picture, camera\n\n"
+        "BANNED — these words are too generic to be useful as standalone keywords. Never use them alone:\n"
+        "photo, image, picture, camera, photograph, photography, "
+        "beautiful, stunning, amazing, gorgeous, "
+        "outdoor, indoor, background, foreground, scene, view\n\n"
+        "ALLOWED but only when specific: geographic/terrain words (desert, sand dune, lava field, salt flat) "
+        "are fine when they describe a particular place or landform — just make them specific. "
+        '"sand" alone is banned; "Mojave sand flat" or "black sand beach" is good.\n\n'
         'GOOD examples: "Diamond Head crater", "long-exposure waterfall", "taro lo\'i", "lava bench", "outrigger canoe", '
-        '"monsoon shelf cloud", "wet-plate portrait", "brutalist facade", "golden-hour sidelight", "aerial perspective"\n'
-        'BAD examples: "beach", "water", "blue sky", "palm tree", "mountain", "building", "landscape", "nature"\n\n'
+        '"monsoon shelf cloud", "wet-plate portrait", "brutalist facade", "golden-hour sidelight", "Mojave desert camp"\n'
+        'BAD examples: "nature", "landscape", "beautiful", "photo", "image"\n\n'
+        "If a PHOTOGRAPHER'S BRIEF is provided above, prioritise its named subjects, locations, and vocabulary in your keywords.\n\n"
         "Use lowercase. Prefer two-word specific phrases over single generic words."
     )
     sections.append(core)

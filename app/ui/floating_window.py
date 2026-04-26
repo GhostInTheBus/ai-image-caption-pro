@@ -1,12 +1,10 @@
 """
 Floating drop zone — the main app window.
 
-Behavior:
-  • Small always-on-top window in "drop zone" state
-  • Accepts folder drag-and-drop
-  • Expands to progress panel while a batch is running
-  • Collapses back to drop zone when complete
-  • Frameless: draggable by clicking anywhere on the title bar area
+Pages (QStackedWidget):
+  0 — Drop zone    : idle, accepts drags
+  1 — Staging      : files queued, waiting for Start button
+  2 — Progress     : batch running
 """
 from __future__ import annotations
 
@@ -14,12 +12,13 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import (
-    QEvent, QPoint, QSize, Qt, QThread, pyqtSignal, pyqtSlot,
+    QEvent, QPoint, Qt, QThread, pyqtSignal, pyqtSlot,
 )
 from PyQt6.QtGui import QColor, QDragEnterEvent, QDropEvent, QPalette
 from PyQt6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QHBoxLayout, QLabel,
+    QListWidget, QListWidgetItem, QMessageBox,
+    QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from app.core.agent import BatchWorker, IMAGE_EXTENSIONS, make_batch_id, scan_folder
@@ -28,15 +27,14 @@ from app.models import Settings
 from app.ui.progress_panel import ProgressPanel
 from app.ui.settings_dialog import SettingsDialog, load_settings, save_settings
 
-DROP_ZONE_SIZE = QSize(220, 200)
+MIN_W, MIN_H = 280, 240
 
 
 class FloatingWindow(QWidget):
     """Main application window."""
 
-    # Emitted so the tray icon can update its tooltip / send notifications
-    status_changed  = pyqtSignal(str)          # e.g. "Processing 12 files…"
-    batch_finished  = pyqtSignal(int, int)     # done, errors
+    status_changed  = pyqtSignal(str)
+    batch_finished  = pyqtSignal(int, int)
 
     def __init__(self):
         super().__init__()
@@ -44,6 +42,10 @@ class FloatingWindow(QWidget):
         self._drag_origin: Optional[QPoint] = None
         self._worker: Optional[BatchWorker] = None
         self._thread: Optional[QThread] = None
+
+        # Staged files waiting for Start button
+        self._staged_folder: Optional[Path] = None
+        self._staged_files: Optional[list[Path]] = None
 
         self._setup_window()
         self._build_ui()
@@ -57,9 +59,9 @@ class FloatingWindow(QWidget):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setAcceptDrops(True)
-        self.setFixedSize(DROP_ZONE_SIZE)
+        self.setMinimumSize(MIN_W, MIN_H)
+        self.resize(MIN_W, MIN_H)
 
-        # Dark-ish palette
         pal = self.palette()
         pal.setColor(QPalette.ColorRole.Window, QColor("#1e1e2e"))
         pal.setColor(QPalette.ColorRole.WindowText, QColor("#cdd6f4"))
@@ -105,6 +107,15 @@ class FloatingWindow(QWidget):
             QDialog { background: #1e1e2e; color: #cdd6f4; }
             QLabel { color: #cdd6f4; }
             QCheckBox { color: #cdd6f4; }
+            QListWidget {
+                background: #181825;
+                border: 1px solid #313244;
+                border-radius: 3px;
+                color: #cdd6f4;
+                font-size: 12px;
+            }
+            QListWidget::item { padding: 2px 4px; }
+            QListWidget::item:selected { background: #313244; }
         """)
 
     # ── UI structure ──────────────────────────────────────────────────────────
@@ -124,17 +135,21 @@ class FloatingWindow(QWidget):
 
         tbl = QHBoxLayout(title_bar)
         tbl.setContentsMargins(8, 0, 8, 0)
-
         title_lbl = QLabel("📷  AI Image Caption Pro")
         title_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #89b4fa;")
         tbl.addWidget(title_lbl)
         tbl.addStretch()
 
+        # Resize grip hint (top-right corner)
+        grip_hint = QLabel("⌟")
+        grip_hint.setStyleSheet("color: #45475a; font-size: 16px; padding-right: 2px;")
+        grip_hint.setToolTip("Drag window edges to resize")
+        tbl.addWidget(grip_hint)
+
         close_btn = QPushButton("✕")
         close_btn.setFixedSize(22, 22)
         close_btn.setStyleSheet(
-            "background: transparent; border: none; color: #888; font-size: 14px;"
-            "padding: 0;"
+            "background: transparent; border: none; color: #888; font-size: 14px; padding: 0;"
         )
         close_btn.setToolTip("Hide to menu bar")
         close_btn.clicked.connect(self.hide)
@@ -142,7 +157,6 @@ class FloatingWindow(QWidget):
 
         root.addWidget(title_bar)
 
-        # Stacked pages: [0] drop zone, [1] progress panel
         self._stack = QStackedWidget()
         root.addWidget(self._stack, 1)
 
@@ -150,17 +164,18 @@ class FloatingWindow(QWidget):
         self._drop_page = self._build_drop_page()
         self._stack.addWidget(self._drop_page)
 
-        # Page 1: progress — created fresh per batch
+        # Pages 1 & 2 are built dynamically per batch
         self._progress_panel: Optional[ProgressPanel] = None
 
     def _build_drop_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(6)
 
         icon_lbl = QLabel("📂")
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet("font-size: 48px;")
+        icon_lbl.setStyleSheet("font-size: 44px;")
         layout.addWidget(icon_lbl)
 
         hint = QLabel("Drop photos or a folder here")
@@ -168,7 +183,7 @@ class FloatingWindow(QWidget):
         hint.setStyleSheet("color: #888; font-size: 14px;")
         layout.addWidget(hint)
 
-        hint2 = QLabel("RAW + JPG supported")
+        hint2 = QLabel("RAW · JPEG · PSD supported")
         hint2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint2.setStyleSheet("color: #555; font-size: 12px;")
         layout.addWidget(hint2)
@@ -183,14 +198,12 @@ class FloatingWindow(QWidget):
         self._batch_status_btn.setVisible(False)
         layout.addWidget(self._batch_status_btn)
 
-        # Bottom toolbar
         toolbar = QWidget()
         tbl = QHBoxLayout(toolbar)
         tbl.setContentsMargins(8, 4, 8, 8)
 
         settings_btn = QPushButton("⚙ Settings")
         settings_btn.clicked.connect(self._open_settings)
-
         log_btn = QPushButton("📋 Log")
         log_btn.clicked.connect(self._open_log)
 
@@ -200,10 +213,62 @@ class FloatingWindow(QWidget):
 
         layout.addStretch()
         layout.addWidget(toolbar)
+        return page
+
+    def _build_staging_page(self, folder: Path, file_list: list[Path]) -> QWidget:
+        """Page shown after a drop, before the user clicks Start."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        # Header
+        header = QHBoxLayout()
+        folder_lbl = QLabel(f"<b>{folder.name}</b>")
+        folder_lbl.setStyleSheet("font-size: 14px;")
+        count_lbl = QLabel(f"{len(file_list)} file{'s' if len(file_list) != 1 else ''}")
+        count_lbl.setStyleSheet("color: #888; font-size: 12px;")
+        header.addWidget(folder_lbl)
+        header.addStretch()
+        header.addWidget(count_lbl)
+        layout.addLayout(header)
+
+        # File list
+        file_list_widget = QListWidget()
+        file_list_widget.setAlternatingRowColors(True)
+        for f in file_list:
+            item = QListWidgetItem(f.name)
+            item.setToolTip(str(f))
+            file_list_widget.addItem(item)
+        layout.addWidget(file_list_widget, 1)
+
+        # Force-reprocess checkbox (only shown if skip_already_done is on)
+        self._force_reprocess_check = QCheckBox("Re-process files already captioned")
+        self._force_reprocess_check.setChecked(False)
+        self._force_reprocess_check.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addWidget(self._force_reprocess_check)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        clear_btn = QPushButton("← Clear")
+        clear_btn.clicked.connect(self._cancel_staging)
+
+        start_btn = QPushButton("▶  Start")
+        start_btn.setDefault(True)
+        start_btn.setStyleSheet(
+            "background: #1a472a; color: #a6e3a1; border: 1px solid #a6e3a1;"
+            "border-radius: 4px; padding: 6px 16px; font-size: 14px; font-weight: bold;"
+        )
+        start_btn.clicked.connect(self._start_from_staging)
+
+        btn_row.addWidget(clear_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(start_btn)
+        layout.addLayout(btn_row)
 
         return page
 
-    # ── Re-raise when app comes back into focus ───────────────────────────────
+    # ── App state ─────────────────────────────────────────────────────────────
 
     def _on_app_state_changed(self, state) -> None:
         if state == Qt.ApplicationState.ApplicationActive and self.isVisible():
@@ -231,11 +296,14 @@ class FloatingWindow(QWidget):
 
     def dropEvent(self, event: QDropEvent) -> None:
         self.setStyleSheet(self.styleSheet().replace("#1a1a2e", "#1e1e2e"))
+        if self._thread and self._thread.isRunning():
+            QMessageBox.information(self, "Busy", "A batch is already running. Stop it first.")
+            return
+
         urls = event.mimeData().urls()
         if not urls:
             return
 
-        # Separate folders from individual image files
         folders: list[Path] = []
         loose_files: list[Path] = []
         for url in urls:
@@ -246,56 +314,63 @@ class FloatingWindow(QWidget):
                 loose_files.append(p)
 
         if folders:
-            # Folder drop: use first folder (existing behaviour)
-            self._start_batch(folders[0])
-        elif loose_files:
-            # Individual file(s): use the parent dir for display/batch-ID purposes
-            folder = loose_files[0].parent
-            self._start_batch(folder, files=loose_files)
-
-    # ── Batch lifecycle ───────────────────────────────────────────────────────
-
-    def _start_batch(
-        self,
-        folder: Path,
-        force: bool = False,
-        files: Optional[list[Path]] = None,
-    ) -> None:
-        if self._thread and self._thread.isRunning():
-            QMessageBox.information(self, "Busy", "A batch is already running. Stop it first.")
-            return
-
-        # Resolve the file list (explicit drop or folder scan)
-        if files is not None:
-            file_list = files
-        else:
+            folder = folders[0]
             file_list = scan_folder(folder, self.settings.recursive_scan)
+        elif loose_files:
+            folder = loose_files[0].parent
+            file_list = loose_files
+        else:
+            return
 
         if not file_list:
             QMessageBox.warning(self, "No Images", f"No image files found in:\n{folder}")
             return
 
-        # If every file is already done and skip_already_done is on, offer reprocess
-        if self.settings.skip_already_done and not force:
-            from app.core.job_db import init_db, is_done
-            from app.models import ImageJob
-            init_db()
-            batch_id = make_batch_id(folder)
-            all_done = all(
-                is_done(ImageJob(file_path=f, batch_id=batch_id).job_id)
-                for f in file_list
-            )
-            if all_done:
-                reply = QMessageBox.question(
-                    self, "Already Processed",
-                    f"All {len(file_list)} files in '{folder.name}' were already captioned.\n\n"
-                    "Reprocess them anyway?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    self._start_batch(folder, force=True, files=files)
-                return
+        self._stage_files(folder, file_list)
 
+    # ── Staging ───────────────────────────────────────────────────────────────
+
+    def _stage_files(self, folder: Path, file_list: list[Path]) -> None:
+        """Show the staging page — user reviews files then clicks Start."""
+        self._staged_folder = folder
+        self._staged_files = file_list
+
+        # Replace any existing staging page
+        if self._stack.count() > 1:
+            self._stack.removeWidget(self._stack.widget(1))
+            if self._stack.count() > 1:
+                self._stack.removeWidget(self._stack.widget(1))
+
+        staging_page = self._build_staging_page(folder, file_list)
+        self._stack.addWidget(staging_page)
+        self._stack.setCurrentIndex(1)
+        self.resize(max(self.width(), 320), max(self.height(), 360))
+
+    def _cancel_staging(self) -> None:
+        self._staged_folder = None
+        self._staged_files = None
+        self._stack.setCurrentIndex(0)
+        self.resize(MIN_W, MIN_H)
+
+    def _start_from_staging(self) -> None:
+        if not self._staged_folder or not self._staged_files:
+            return
+        force = self._force_reprocess_check.isChecked()
+        self._launch_batch(
+            folder=self._staged_folder,
+            file_list=self._staged_files,
+            force=force,
+        )
+
+    # ── Batch lifecycle ───────────────────────────────────────────────────────
+
+    def _launch_batch(
+        self,
+        folder: Path,
+        file_list: list[Path],
+        force: bool = False,
+    ) -> None:
+        """Wire up the worker and switch to the progress view."""
         # Build progress panel
         self._progress_panel = ProgressPanel(
             folder_name=folder.name,
@@ -306,24 +381,23 @@ class FloatingWindow(QWidget):
         self._progress_panel.stop_clicked.connect(self._stop_batch)
         self._progress_panel.close_clicked.connect(self._collapse_to_drop_zone)
 
-        # Pre-populate file rows
         for f in file_list:
             self._progress_panel.add_file(f.name)
 
-        # Swap to progress page
-        if self._stack.count() > 1:
+        # Replace stack pages 1+ with progress panel
+        while self._stack.count() > 1:
             self._stack.removeWidget(self._stack.widget(1))
         self._stack.addWidget(self._progress_panel)
         self._stack.setCurrentIndex(1)
-        self.setFixedSize(360, 480)
+        self.resize(max(self.width(), 360), max(self.height(), 480))
 
-        # If forced reprocess, reset DB state for this batch
+        # If force, reset DB state
         if force:
             from app.core.job_db import reset_batch_for_reprocess
             reset_batch_for_reprocess(make_batch_id(folder))
 
-        # Worker thread
-        self._worker = BatchWorker(folder=folder, settings=self.settings, files=files)
+        # Explicit file list passed so worker doesn't re-scan
+        self._worker = BatchWorker(folder=folder, settings=self.settings, files=file_list)
         self._thread = QThread()
         self._worker.moveToThread(self._thread)
 
@@ -351,11 +425,10 @@ class FloatingWindow(QWidget):
 
     def _show_progress_panel(self) -> None:
         self._stack.setCurrentIndex(1)
-        self.setFixedSize(360, 480)
+        self.resize(max(self.width(), 360), max(self.height(), 480))
 
     def _collapse_to_drop_zone(self) -> None:
         self._stack.setCurrentIndex(0)
-        self.setFixedSize(DROP_ZONE_SIZE)
         running = bool(self._thread and self._thread.isRunning())
         self._batch_status_btn.setVisible(running)
 
@@ -437,9 +510,7 @@ class FloatingWindow(QWidget):
             table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
             table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
             for col in (2, 3, 4):
-                table.horizontalHeader().setSectionResizeMode(
-                    col, QHeaderView.ResizeMode.ResizeToContents
-                )
+                table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
             table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
             table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
             table.verticalHeader().setVisible(False)
@@ -448,10 +519,7 @@ class FloatingWindow(QWidget):
             for row, b in enumerate(batches):
                 name = Path(b["folder_path"]).name
                 date = (b["created_at"] or "")[:16]
-                done = str(b["done"] or 0)
-                err  = str(b["errors"] or 0)
-                skip = str(b["skipped"] or 0)
-                for col, val in enumerate([name, date, done, err, skip]):
+                for col, val in enumerate([name, date, str(b["done"] or 0), str(b["errors"] or 0), str(b["skipped"] or 0)]):
                     item = QTableWidgetItem(val)
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     table.setItem(row, col, item)
@@ -459,27 +527,22 @@ class FloatingWindow(QWidget):
             layout.addWidget(table)
 
         btn_row = QHBoxLayout()
-
         clear_incomplete_btn = QPushButton("Clear Errors / Incomplete")
-        clear_incomplete_btn.setToolTip("Remove failed and pending jobs so they can be reprocessed")
         clear_incomplete_btn.setStyleSheet("color: #e57373;")
-
         clear_all_btn = QPushButton("Clear All History")
-        clear_all_btn.setToolTip("Wipe the entire job database — all files will be reprocessed on next drop")
         clear_all_btn.setStyleSheet("color: #e57373;")
-
         close_btn2 = QPushButton("Close")
         close_btn2.clicked.connect(dlg.accept)
 
         def do_clear_incomplete():
             n = clear_incomplete_jobs()
-            QMessageBox.information(dlg, "Cleared", f"Removed {n} incomplete job(s).\nDrop the folder again to reprocess.")
+            QMessageBox.information(dlg, "Cleared", f"Removed {n} incomplete job(s).")
             dlg.accept()
 
         def do_clear_all():
             reply = QMessageBox.question(
                 dlg, "Clear All?",
-                "This will remove all job history.\nAll files will be reprocessed on the next drop.\nContinue?",
+                "This removes all job history. All files will be reprocessed on next drop.\nContinue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
@@ -494,7 +557,6 @@ class FloatingWindow(QWidget):
         btn_row.addStretch()
         btn_row.addWidget(close_btn2)
         layout.addLayout(btn_row)
-
         dlg.exec()
 
     # ── Auto-resume on launch ─────────────────────────────────────────────────
@@ -507,16 +569,17 @@ class FloatingWindow(QWidget):
             return
         reply = QMessageBox.question(
             self, "Resume Previous Batch?",
-            f"{len(incomplete)} unfinished batch(es) detected from a previous run.\n"
-            "Resume processing?",
+            f"{len(incomplete)} unfinished batch(es) detected from a previous run.\nResume processing?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             for batch_id in incomplete:
                 folder = job_db.get_batch_folder(batch_id)
                 if folder and folder.exists():
-                    self._start_batch(folder)
-                    break   # one at a time
+                    file_list = scan_folder(folder, self.settings.recursive_scan)
+                    if file_list:
+                        self._stage_files(folder, file_list)
+                    break
 
     # ── Window dragging (frameless) ───────────────────────────────────────────
 

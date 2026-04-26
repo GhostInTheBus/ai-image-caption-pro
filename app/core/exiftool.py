@@ -191,7 +191,7 @@ def write_iptc(
     # Build final caption — AI portion always ends with [ai] footnote
     ai_caption = f"{caption} [ai]"
     if existing_caption and existing_caption.strip():
-        final_caption = f"{existing_caption.strip()}\n\n{ai_caption}"
+        final_caption = f"{existing_caption.strip()}\n\n—\n\n{ai_caption}"
     else:
         final_caption = ai_caption
 

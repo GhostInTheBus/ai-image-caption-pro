@@ -210,6 +210,10 @@ class BatchWorker(QObject):
         if folder_brief.exists():
             context_parts.append(folder_brief.read_text(encoding="utf-8"))
         context_md = "\n\n---\n\n".join(context_parts)
+        if context_md:
+            print(f"[context] {job.display_name}: loaded {len(context_md)} chars from {len(context_parts)} source(s)", flush=True)
+        else:
+            print(f"[context] {job.display_name}: no context brief found", flush=True)
 
         caption, keywords = generate_caption(
             image_path=preview_path, settings=s, context_md=context_md
