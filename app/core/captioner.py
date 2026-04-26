@@ -61,7 +61,7 @@ OPENAI_MODELS = [
     "gpt-4-turbo",
 ]
 
-_OLLAMA_TIMEOUT = 180   # seconds; bump if your model is very large
+_OLLAMA_TIMEOUT = 600   # seconds; 72B models can take 5+ min on first load
 
 
 # ── Ollama helpers ────────────────────────────────────────────────────────────
