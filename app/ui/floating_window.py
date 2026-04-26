@@ -173,6 +173,16 @@ class FloatingWindow(QWidget):
         hint2.setStyleSheet("color: #555; font-size: 12px;")
         layout.addWidget(hint2)
 
+        # Batch-in-progress banner (hidden while idle)
+        self._batch_status_btn = QPushButton("⟳  Batch in progress — tap to view")
+        self._batch_status_btn.setStyleSheet(
+            "background: #1e3a5f; color: #89b4fa; border: 1px solid #89b4fa;"
+            "border-radius: 4px; padding: 5px 10px; font-size: 12px;"
+        )
+        self._batch_status_btn.clicked.connect(self._show_progress_panel)
+        self._batch_status_btn.setVisible(False)
+        layout.addWidget(self._batch_status_btn)
+
         # Bottom toolbar
         toolbar = QWidget()
         tbl = QHBoxLayout(toolbar)
@@ -316,9 +326,15 @@ class FloatingWindow(QWidget):
         if self._worker:
             self._worker.stop()
 
+    def _show_progress_panel(self) -> None:
+        self._stack.setCurrentIndex(1)
+        self.setFixedSize(360, 480)
+
     def _collapse_to_drop_zone(self) -> None:
         self._stack.setCurrentIndex(0)
         self.setFixedSize(DROP_ZONE_SIZE)
+        running = bool(self._thread and self._thread.isRunning())
+        self._batch_status_btn.setVisible(running)
 
     # ── Worker slots ──────────────────────────────────────────────────────────
 
@@ -360,6 +376,7 @@ class FloatingWindow(QWidget):
         if self._thread:
             self._thread.quit()
             self._thread.wait()
+        self._batch_status_btn.setVisible(False)
         self.status_changed.emit("Idle")
         self.batch_finished.emit(done, errors)
 

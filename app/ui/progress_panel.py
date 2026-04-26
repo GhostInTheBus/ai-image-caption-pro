@@ -133,7 +133,7 @@ class ProgressPanel(QWidget):
 
         self.back_btn = QPushButton("← Back")
         self.back_btn.setFixedHeight(28)
-        self.back_btn.setToolTip("Stop processing and return to drop zone")
+        self.back_btn.setToolTip("Return to drop zone (batch keeps running)")
         self.back_btn.clicked.connect(self._on_back)
 
         self.pause_btn = QPushButton("Pause")
@@ -152,8 +152,7 @@ class ProgressPanel(QWidget):
         layout.addLayout(btn_row)
 
     def _on_back(self) -> None:
-        self.stop_clicked.emit()   # stop worker
-        self.close_clicked.emit()  # collapse to drop zone
+        self.close_clicked.emit()  # navigate back; batch keeps running
 
     def _on_pause(self) -> None:
         self._paused = not self._paused

@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import List
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QCheckBox, QMessageBox,
-    QPushButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QScrollArea, QSlider,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from app.models import Settings
@@ -47,7 +49,7 @@ def _write_toml(path: Path, data: dict) -> None:
     lines = []
     for key, val in data.items():
         if isinstance(val, str):
-            escaped = val.replace("\\", "\\\\").replace('"', '\\"')
+            escaped = val.replace("\\", "\\\\").replace('"', '\\"').replace('\n', '\\n').replace('\r', '')
             lines.append(f'{key} = "{escaped}"')
         elif isinstance(val, bool):
             lines.append(f'{key} = {"true" if val else "false"}')
@@ -80,15 +82,25 @@ class SettingsDialog(QDialog):
     def __init__(self, settings: Settings, available_models: List[str], parent=None):
         super().__init__(parent)
         self.setWindowTitle("AI Image Caption Pro — Settings")
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(540)
+        self.resize(600, 680)
         self.settings = settings
 
-        layout = QVBoxLayout(self)
+        # Scroll area so the dialog works on small screens
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 4)
 
         # ── Identity ──────────────────────────────────────────────────────────
         identity_group = QGroupBox("Photographer Identity (written to every file)")
         form = QFormLayout(identity_group)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
         self.artist_edit = QLineEdit(settings.artist_name)
         self.artist_edit.setPlaceholderText("e.g. Alex Rivera")
@@ -107,6 +119,7 @@ class SettingsDialog(QDialog):
         # ── Location defaults ─────────────────────────────────────────────────
         loc_group = QGroupBox("Location Defaults (only written if not already set)")
         loc_form = QFormLayout(loc_group)
+        loc_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
         self.city_edit = QLineEdit(settings.default_city)
         self.city_edit.setPlaceholderText("e.g. Rochester  (leave blank to skip)")
@@ -144,24 +157,41 @@ class SettingsDialog(QDialog):
         self.backend_combo.currentIndexChanged.connect(self._backend_stack.setCurrentIndex)
 
         # Keywords (shared across all backends)
-        kw_row = QFormLayout()
-        self.max_kw_spin = QSpinBox()
-        self.max_kw_spin.setRange(1, 9999)
-        self.max_kw_spin.setValue(settings.max_keywords)
-        self.max_kw_spin.setSuffix(" keywords max")
-        kw_row.addRow("Keywords:", self.max_kw_spin)
-        ai_layout.addLayout(kw_row)
+        kw_form = QFormLayout()
+        kw_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        kw_widget = QWidget()
+        kw_h = QHBoxLayout(kw_widget)
+        kw_h.setContentsMargins(0, 0, 0, 0)
+        kw_h.setSpacing(8)
+        self.kw_slider = QSlider(Qt.Orientation.Horizontal)
+        self.kw_slider.setRange(3, 30)
+        self.kw_slider.setValue(settings.max_keywords)
+        self.kw_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.kw_slider.setTickInterval(5)
+        self._kw_val_label = QLabel(str(settings.max_keywords))
+        self._kw_val_label.setFixedWidth(28)
+        self._kw_val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.kw_slider.valueChanged.connect(lambda v: self._kw_val_label.setText(str(v)))
+        kw_h.addWidget(self.kw_slider, 1)
+        kw_h.addWidget(self._kw_val_label)
+        kw_form.addRow("Max keywords:", kw_widget)
+        ai_layout.addLayout(kw_form)
 
         layout.addWidget(ai_group)
 
         # ── Context hint ──────────────────────────────────────────────────────
-        ctx_group = QGroupBox("Context Hint (optional — added to every caption prompt)")
-        ctx_form = QFormLayout(ctx_group)
-        self.context_edit = QLineEdit(settings.context_hint)
+        ctx_group = QGroupBox("Context (optional — sent to AI with every caption request)")
+        ctx_layout = QVBoxLayout(ctx_group)
+        self.context_edit = QPlainTextEdit()
+        self.context_edit.setPlainText(settings.context_hint)
         self.context_edit.setPlaceholderText(
-            "e.g. Shot in Kyoto, Japan. Spring cherry blossom season, 2024."
+            "Describe the shoot: location, subjects, event, style.\n"
+            "e.g. Wedding at Waimea Valley, Oahu. Ceremony at the waterfall.\n"
+            "Couple: Marcus and Lena. Late afternoon golden hour light."
         )
-        ctx_form.addRow("Context:", self.context_edit)
+        self.context_edit.setMinimumHeight(90)
+        self.context_edit.setMaximumHeight(160)
+        ctx_layout.addWidget(self.context_edit)
         layout.addWidget(ctx_group)
 
         # ── Behaviour ─────────────────────────────────────────────────────────
@@ -186,14 +216,28 @@ class SettingsDialog(QDialog):
         b_form.addRow(self.skip_done_check)
 
         layout.addWidget(behaviour_group)
+        layout.addStretch()
 
-        # ── Buttons ───────────────────────────────────────────────────────────
+        # Finish wiring scroll area
+        scroll.setWidget(content)
+
+        # ── Outer layout: scroll + buttons ────────────────────────────────────
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 8)
+        outer.setSpacing(0)
+        outer.addWidget(scroll, 1)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        btn_wrapper = QWidget()
+        btn_wrapper.setContentsMargins(12, 4, 12, 0)
+        btn_l = QVBoxLayout(btn_wrapper)
+        btn_l.setContentsMargins(12, 4, 12, 0)
+        btn_l.addWidget(buttons)
+        outer.addWidget(btn_wrapper)
 
     # ── Backend panel builders ────────────────────────────────────────────────
 
@@ -298,8 +342,8 @@ class SettingsDialog(QDialog):
         self.settings.credit_line      = self.credit_edit.text().strip()
         self.settings.default_city     = self.city_edit.text().strip()
         self.settings.default_country  = self.country_edit.text().strip()
-        self.settings.context_hint     = self.context_edit.text().strip()
-        self.settings.max_keywords     = self.max_kw_spin.value()
+        self.settings.context_hint     = self.context_edit.toPlainText().strip()
+        self.settings.max_keywords     = self.kw_slider.value()
         self.settings.caption_mode      = self.caption_mode_combo.currentData()
         self.settings.recursive_scan   = self.recursive_check.isChecked()
         self.settings.skip_already_done = self.skip_done_check.isChecked()
