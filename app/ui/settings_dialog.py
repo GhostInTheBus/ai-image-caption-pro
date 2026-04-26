@@ -121,15 +121,70 @@ class SettingsDialog(QDialog):
         loc_form = QFormLayout(loc_group)
         loc_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
+        self.sublocation_edit = QLineEdit(settings.default_sublocation)
+        self.sublocation_edit.setPlaceholderText("e.g. Waimea Valley, Diamond Head Crater")
+        loc_form.addRow("Sublocation:", self.sublocation_edit)
+
         self.city_edit = QLineEdit(settings.default_city)
-        self.city_edit.setPlaceholderText("e.g. Rochester  (leave blank to skip)")
+        self.city_edit.setPlaceholderText("e.g. Honolulu")
         loc_form.addRow("City:", self.city_edit)
+
+        self.state_edit = QLineEdit(settings.default_state_province)
+        self.state_edit.setPlaceholderText("e.g. Hawaii")
+        loc_form.addRow("State / Province:", self.state_edit)
 
         self.country_edit = QLineEdit(settings.default_country)
         self.country_edit.setPlaceholderText("e.g. United States")
         loc_form.addRow("Country:", self.country_edit)
 
+        self.country_code_edit = QLineEdit(settings.default_country_code)
+        self.country_code_edit.setPlaceholderText("e.g. USA  (ISO 3-letter code)")
+        self.country_code_edit.setMaxLength(3)
+        loc_form.addRow("Country Code:", self.country_code_edit)
+
         layout.addWidget(loc_group)
+
+        # ── Publication / IPTC stationery ─────────────────────────────────────
+        pub_group = QGroupBox("Publication Info (written to every file if set)")
+        pub_form = QFormLayout(pub_group)
+        pub_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        self.headline_edit = QLineEdit(settings.headline)
+        self.headline_edit.setPlaceholderText("e.g. Cherry Blossom Festival 2024")
+        pub_form.addRow("Headline:", self.headline_edit)
+
+        self.source_edit = QLineEdit(settings.source)
+        self.source_edit.setPlaceholderText("e.g. Alex Rivera Photography")
+        pub_form.addRow("Source:", self.source_edit)
+
+        self.instructions_edit = QLineEdit(settings.instructions)
+        self.instructions_edit.setPlaceholderText("e.g. No crop, embargo until May 1")
+        pub_form.addRow("Instructions:", self.instructions_edit)
+
+        self.job_id_edit = QLineEdit(settings.job_identifier)
+        self.job_id_edit.setPlaceholderText("e.g. WED-2024-0412 or assignment number")
+        pub_form.addRow("Job / Assignment ID:", self.job_id_edit)
+
+        layout.addWidget(pub_group)
+
+        # ── Contact ───────────────────────────────────────────────────────────
+        contact_group = QGroupBox("Contact (embedded as XMP-iptcCore contact fields)")
+        contact_form = QFormLayout(contact_group)
+        contact_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        self.contact_email_edit = QLineEdit(settings.contact_email)
+        self.contact_email_edit.setPlaceholderText("e.g. photo@example.com")
+        contact_form.addRow("Email:", self.contact_email_edit)
+
+        self.contact_phone_edit = QLineEdit(settings.contact_phone)
+        self.contact_phone_edit.setPlaceholderText("e.g. +1-555-000-0000")
+        contact_form.addRow("Phone:", self.contact_phone_edit)
+
+        self.contact_url_edit = QLineEdit(settings.contact_url)
+        self.contact_url_edit.setPlaceholderText("e.g. https://example.com")
+        contact_form.addRow("Website:", self.contact_url_edit)
+
+        layout.addWidget(contact_group)
 
         # ── AI Backend ────────────────────────────────────────────────────────
         ai_group = QGroupBox("AI Backend")
@@ -340,8 +395,18 @@ class SettingsDialog(QDialog):
         self.settings.artist_name      = self.artist_edit.text().strip()
         self.settings.copyright_notice = self.copyright_edit.text().strip()
         self.settings.credit_line      = self.credit_edit.text().strip()
-        self.settings.default_city     = self.city_edit.text().strip()
-        self.settings.default_country  = self.country_edit.text().strip()
+        self.settings.default_sublocation    = self.sublocation_edit.text().strip()
+        self.settings.default_city           = self.city_edit.text().strip()
+        self.settings.default_state_province = self.state_edit.text().strip()
+        self.settings.default_country        = self.country_edit.text().strip()
+        self.settings.default_country_code   = self.country_code_edit.text().strip().upper()
+        self.settings.headline               = self.headline_edit.text().strip()
+        self.settings.source                 = self.source_edit.text().strip()
+        self.settings.instructions           = self.instructions_edit.text().strip()
+        self.settings.job_identifier         = self.job_id_edit.text().strip()
+        self.settings.contact_email          = self.contact_email_edit.text().strip()
+        self.settings.contact_phone          = self.contact_phone_edit.text().strip()
+        self.settings.contact_url            = self.contact_url_edit.text().strip()
         self.settings.context_hint     = self.context_edit.toPlainText().strip()
         self.settings.max_keywords     = self.kw_slider.value()
         self.settings.caption_mode      = self.caption_mode_combo.currentData()

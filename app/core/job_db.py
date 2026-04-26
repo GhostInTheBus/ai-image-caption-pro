@@ -182,6 +182,28 @@ def get_recent_batches(limit: int = 15) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def clear_all_jobs() -> int:
+    """Delete the entire job history."""
+    with _conn() as con:
+        cur = con.execute("DELETE FROM jobs")
+        con.execute("DELETE FROM batches")
+        return cur.rowcount
+
+
+def clear_incomplete_jobs() -> int:
+    """Delete all pending/running/error jobs so they can be reprocessed."""
+    with _conn() as con:
+        cur = con.execute(
+            "DELETE FROM jobs WHERE status IN ('pending', 'running', 'error')"
+        )
+        con.execute("""
+            DELETE FROM batches WHERE batch_id NOT IN (
+                SELECT DISTINCT batch_id FROM jobs
+            )
+        """)
+        return cur.rowcount
+
+
 def get_batch_stats(batch_id: str) -> dict:
     with _conn() as con:
         row = con.execute("""

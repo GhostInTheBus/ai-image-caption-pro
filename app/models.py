@@ -75,7 +75,21 @@ class Settings:
     copyright_notice: str = ""
     credit_line: str = ""
     default_city: str = ""
+    default_state_province: str = ""
+    default_sublocation: str = ""
     default_country: str = ""
+    default_country_code: str = ""
+
+    # Publication / stationery
+    headline: str = ""
+    source: str = ""
+    instructions: str = ""
+    job_identifier: str = ""
+
+    # Contact
+    contact_email: str = ""
+    contact_phone: str = ""
+    contact_url: str = ""
 
     # ── AI backend ────────────────────────────────────────────────────────────
     backend: str = "ollama"             # "ollama" | "gemini" | "claude" | "openai"

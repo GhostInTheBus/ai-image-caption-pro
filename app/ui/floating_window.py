@@ -392,7 +392,7 @@ class FloatingWindow(QWidget):
         from PyQt6.QtWidgets import (
             QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QDialogButtonBox,
         )
-        from app.core.job_db import get_recent_batches
+        from app.core.job_db import get_recent_batches, clear_all_jobs, clear_incomplete_jobs
 
         batches = get_recent_batches(limit=20)
 
@@ -435,9 +435,42 @@ class FloatingWindow(QWidget):
 
             layout.addWidget(table)
 
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        btns.rejected.connect(dlg.reject)
-        layout.addWidget(btns)
+        btn_row = QHBoxLayout()
+
+        clear_incomplete_btn = QPushButton("Clear Errors / Incomplete")
+        clear_incomplete_btn.setToolTip("Remove failed and pending jobs so they can be reprocessed")
+        clear_incomplete_btn.setStyleSheet("color: #e57373;")
+
+        clear_all_btn = QPushButton("Clear All History")
+        clear_all_btn.setToolTip("Wipe the entire job database — all files will be reprocessed on next drop")
+        clear_all_btn.setStyleSheet("color: #e57373;")
+
+        close_btn2 = QPushButton("Close")
+        close_btn2.clicked.connect(dlg.accept)
+
+        def do_clear_incomplete():
+            n = clear_incomplete_jobs()
+            QMessageBox.information(dlg, "Cleared", f"Removed {n} incomplete job(s).\nDrop the folder again to reprocess.")
+            dlg.accept()
+
+        def do_clear_all():
+            reply = QMessageBox.question(
+                dlg, "Clear All?",
+                "This will remove all job history.\nAll files will be reprocessed on the next drop.\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                clear_all_jobs()
+                dlg.accept()
+
+        clear_incomplete_btn.clicked.connect(do_clear_incomplete)
+        clear_all_btn.clicked.connect(do_clear_all)
+
+        btn_row.addWidget(clear_incomplete_btn)
+        btn_row.addWidget(clear_all_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn2)
+        layout.addLayout(btn_row)
 
         dlg.exec()
 

@@ -162,8 +162,18 @@ def write_iptc(
     artist_name: str = "",
     copyright_notice: str = "",
     credit_line: str = "",
+    headline: str = "",
+    source: str = "",
+    instructions: str = "",
+    job_identifier: str = "",
     city: str = "",
+    state_province: str = "",
+    sublocation: str = "",
     country: str = "",
+    country_code: str = "",
+    contact_email: str = "",
+    contact_phone: str = "",
+    contact_url: str = "",
     existing_caption: Optional[str] = None,
     existing_keywords: Optional[List[str]] = None,
     append_separator: str = "\n\n",
@@ -215,12 +225,36 @@ def write_iptc(
     if credit_line:
         cmd.append(f"-IPTC:Credit={credit_line}")
 
+    # Publication / stationery (always write if set)
+    if headline:
+        cmd += [f"-IPTC:Headline={headline}", f"-XMP-photoshop:Headline={headline}"]
+    if source:
+        cmd += [f"-IPTC:Source={source}", f"-XMP-photoshop:Source={source}"]
+    if instructions:
+        cmd += [f"-IPTC:SpecialInstructions={instructions}", f"-XMP-photoshop:Instructions={instructions}"]
+    if job_identifier:
+        cmd += [f"-IPTC:OriginalTransmissionReference={job_identifier}", f"-XMP-photoshop:TransmissionReference={job_identifier}"]
+
+    # Contact info (always write if set)
+    if contact_email:
+        cmd.append(f"-XMP-iptcCore:CiEmailWork={contact_email}")
+    if contact_phone:
+        cmd.append(f"-XMP-iptcCore:CiTelWork={contact_phone}")
+    if contact_url:
+        cmd.append(f"-XMP-iptcCore:CiUrlWork={contact_url}")
+
     # Location defaults — only write if not already present
     existing_meta = read_iptc(file_path)
     if city and not existing_meta.get("City") and not existing_meta.get("IPTC:City"):
         cmd.append(f"-IPTC:City={city}")
+    if state_province and not existing_meta.get("Province-State") and not existing_meta.get("IPTC:Province-State"):
+        cmd.append(f"-IPTC:Province-State={state_province}")
+    if sublocation and not existing_meta.get("Sub-location") and not existing_meta.get("IPTC:Sub-location"):
+        cmd.append(f"-IPTC:Sub-location={sublocation}")
     if country and not existing_meta.get("Country-PrimaryLocationName") and not existing_meta.get("IPTC:Country-PrimaryLocationName"):
         cmd.append(f"-IPTC:Country-PrimaryLocationName={country}")
+    if country_code and not existing_meta.get("Country-PrimaryLocationCode") and not existing_meta.get("IPTC:Country-PrimaryLocationCode"):
+        cmd.append(f"-IPTC:Country-PrimaryLocationCode={country_code}")
 
     cmd.append(str(file_path))
 

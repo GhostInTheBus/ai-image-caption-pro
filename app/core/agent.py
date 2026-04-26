@@ -187,18 +187,32 @@ class BatchWorker(QObject):
 
         # Step 4: write IPTC to original file
         amend = getattr(s, "caption_mode", "amend") == "amend"
+        iptc_kwargs = dict(
+            artist_name=s.artist_name,
+            copyright_notice=s.copyright_year_notice(),
+            credit_line=s.credit_line,
+            headline=s.headline,
+            source=s.source,
+            instructions=s.instructions,
+            job_identifier=s.job_identifier,
+            city=s.default_city,
+            state_province=s.default_state_province,
+            sublocation=s.default_sublocation,
+            country=s.default_country,
+            country_code=s.default_country_code,
+            contact_email=s.contact_email,
+            contact_phone=s.contact_phone,
+            contact_url=s.contact_url,
+            append_separator=s.append_separator,
+        )
+
         exiftool.write_iptc(
             file_path=job.file_path,
             caption=caption,
             keywords=keywords,
-            artist_name=s.artist_name,
-            copyright_notice=s.copyright_year_notice(),
-            credit_line=s.credit_line,
-            city=s.default_city,
-            country=s.default_country,
             existing_caption=existing_caption if amend else None,
             existing_keywords=existing_keywords,
-            append_separator=s.append_separator,
+            **iptc_kwargs,
         )
 
         # If a sidecar JPG exists alongside a RAW, write to that too
@@ -212,14 +226,9 @@ class BatchWorker(QObject):
                         file_path=sidecar,
                         caption=caption,
                         keywords=keywords,
-                        artist_name=s.artist_name,
-                        copyright_notice=s.copyright_year_notice(),
-                        credit_line=s.credit_line,
-                        city=s.default_city,
-                        country=s.default_country,
                         existing_caption=sidecar_existing_caption if amend else None,
                         existing_keywords=sidecar_existing_kw,
-                        append_separator=s.append_separator,
+                        **iptc_kwargs,
                     )
 
         return caption, keywords
