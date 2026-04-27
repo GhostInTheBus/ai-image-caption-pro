@@ -1,12 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[('bin/exiftool', 'bin')],
     datas=[('assets', 'assets')],
-    hiddenimports=['app.ui.floating_window', 'app.ui.progress_panel', 'app.ui.settings_dialog', 'app.ui.tray', 'app.core.agent', 'app.core.captioner', 'app.core.exiftool', 'app.core.job_db', 'app.models'],
+    hiddenimports=[
+        # core
+        'app.core.agent',
+        'app.core.captioner',
+        'app.core.exiftool',
+        'app.core.job_db',
+        'app.models',
+        # ui — all panels
+        'app.ui.main_window',
+        'app.ui.drop_panel',
+        'app.ui.queue_panel',
+        'app.ui.quick_settings_panel',
+        'app.ui.status_bar',
+        'app.ui.progress_panel',
+        'app.ui.settings_dialog',
+        'app.ui.style',
+        # legacy (kept in repo, not entry point)
+        'app.ui.floating_window',
+        'app.ui.tray',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -51,8 +69,8 @@ app = BUNDLE(
     info_plist={
         'NSPrincipalClass': 'NSApplication',
         'NSHighResolutionCapable': True,
-        'CFBundleShortVersionString': '1.0.0',
-        'CFBundleVersion': '1',
+        'CFBundleShortVersionString': '2.0.0',
+        'CFBundleVersion': '2',
         'NSHumanReadableCopyright': '© 2026 AI Image Caption Pro',
         'LSMinimumSystemVersion': '13.0',
     },

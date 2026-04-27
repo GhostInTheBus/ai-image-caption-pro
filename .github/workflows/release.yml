@@ -3,82 +3,115 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build-macos:
+    name: macOS .app + DMG
     runs-on: macos-latest
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
       - name: Install ExifTool
-        run: brew install exiftool && cp $(which exiftool) bin/exiftool
+        run: brew install exiftool
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt pyinstaller
-
-      - name: Build app
-        run: bash build_mac.sh
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AI-Image-Caption-Pro-mac
-          path: AI-Image-Caption-Pro-mac.dmg
-          if-no-files-found: warn
-
-  build-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install system deps
+      - name: Bundle ExifTool
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y libimage-exiftool-perl libxcb-xinerama0 \
-            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
-            libxcb-render-util0 libxkbcommon-x11-0 libegl1
-          cp $(which exiftool) bin/exiftool
+          cp "$(which exiftool)" bin/exiftool
+          chmod +x bin/exiftool
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt pyinstaller
 
-      - name: Build binary
-        run: bash build_linux.sh
+      - name: Build .app (PyInstaller)
+        run: |
+          pyinstaller \
+            --workpath /tmp/aicp_work \
+            --distpath /tmp/aicp_dist \
+            AIImageCaptionPro.spec
 
-      - name: Tar the dist folder
-        run: tar -czf AI-Image-Caption-Pro-linux.tar.gz -C dist AIImageCaptionPro
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname "AI Image Caption Pro" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 450 185 \
+            "AI-Image-Caption-Pro-mac.dmg" \
+            "/tmp/aicp_dist/AI Image Caption Pro.app"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: AI-Image-Caption-Pro-mac.dmg
+
+  build-linux:
+    name: Linux tarball
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl \
+            libxcb-xinerama0 libxcb-cursor0 libxkbcommon-x11-0 \
+            libgl1-mesa-glx libegl1
+
+      - name: Bundle ExifTool
+        run: |
+          cp "$(which exiftool)" bin/exiftool
+          chmod +x bin/exiftool
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build (PyInstaller)
+        run: bash build_linux.sh
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Image-Caption-Pro-linux
-          path: AI-Image-Caption-Pro-linux.tar.gz
+          name: linux-tarball
+          path: AIImageCaptionPro-linux.tar.gz
 
   release:
+    name: Create GitHub Release
     needs: [build-macos, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
 
-      - name: Create GitHub Release
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-tarball
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             AI-Image-Caption-Pro-mac.dmg
-            AI-Image-Caption-Pro-linux.tar.gz
+            AIImageCaptionPro-linux.tar.gz
           generate_release_notes: true
