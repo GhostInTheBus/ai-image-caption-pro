@@ -166,6 +166,8 @@ def write_iptc(
     source: str = "",
     instructions: str = "",
     job_identifier: str = "",
+    alt_text: str = "",
+    extended_description: str = "",
     city: str = "",
     state_province: str = "",
     sublocation: str = "",
@@ -177,21 +179,26 @@ def write_iptc(
     existing_caption: Optional[str] = None,
     existing_keywords: Optional[List[str]] = None,
     append_separator: str = "\n\n",
+    ai_label: str = "[ai]",
 ) -> None:
     """
     Write IPTC and XMP metadata to a file in-place.
 
     Caption append logic:
-      - If existing_caption is set → append with separator
-      - Otherwise → write caption as-is
+      - ai_label (e.g. "[ai]") is appended to the AI caption first
+      - If existing_caption is set → existing + append_separator + ai_caption
+      - Otherwise → write ai_caption as-is
 
     Keyword merge:
       - Combines existing_keywords + new keywords, deduplicated, preserving order
     """
-    # Build final caption — AI portion always ends with [ai] footnote
-    ai_caption = f"{caption} [ai]"
+    # Apply optional signature label to the AI-generated portion only
+    ai_caption = f"{caption} {ai_label}".strip() if ai_label else caption
+
+    # Append after existing caption using the configured separator
     if existing_caption and existing_caption.strip():
-        final_caption = f"{existing_caption.strip()}\n\n—\n\n{ai_caption}"
+        sep = append_separator if append_separator else "\n\n"
+        final_caption = f"{existing_caption.strip()}{sep}{ai_caption}"
     else:
         final_caption = ai_caption
 
@@ -215,10 +222,13 @@ def write_iptc(
         f"-XMP:Description={final_caption}",
     ]
 
-    # Keywords — each as a separate flag
+    # Keywords — write to IPTC, XMP dc:subject, and XMP-lr:HierarchicalSubject
+    # Repeating the same flag multiple times is the correct exiftool idiom for list tags.
+    # XMP-dc:Subject is the dc:subject field that Lightroom, Bridge, and PM all read as "Keywords".
     for kw in merged_kw:
         cmd.append(f"-IPTC:Keywords={kw}")
-        cmd.append(f"-XMP:Subject={kw}")
+        cmd.append(f"-XMP-dc:Subject={kw}")
+        cmd.append(f"-XMP-lr:HierarchicalSubject={kw}")
 
     # Fixed identity fields
     if artist_name:
@@ -237,6 +247,13 @@ def write_iptc(
         cmd += [f"-IPTC:SpecialInstructions={instructions}", f"-XMP-photoshop:Instructions={instructions}"]
     if job_identifier:
         cmd += [f"-IPTC:OriginalTransmissionReference={job_identifier}", f"-XMP-photoshop:TransmissionReference={job_identifier}"]
+
+    # Accessibility fields (IPTC Photo Metadata 2021)
+    # Alt text defaults to the AI caption if not explicitly set
+    effective_alt = alt_text if alt_text else final_caption
+    cmd.append(f"-XMP-iptcExt:AltTextAccessibility={effective_alt}")
+    if extended_description:
+        cmd.append(f"-XMP-iptcExt:ExtDescrAccessibility={extended_description}")
 
     # Contact info (always write if set)
     if contact_email:
@@ -268,6 +285,50 @@ def write_iptc(
     if "1 image files updated" not in result.stdout:
         detail = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(f"exiftool wrote 0 files to {file_path.name} — {detail}")
+
+
+def restore_iptc(
+    file_path: Path,
+    original_caption: Optional[str],
+    original_keywords: List[str],
+) -> None:
+    """
+    Restore Caption-Abstract and Keywords to their pre-AI values.
+    Pass original_caption=None to clear the caption entirely.
+    Pass original_keywords=[] to clear all keywords.
+    Also deletes any XMP sidecar written by the app.
+    """
+    cmd: List[str] = [_et(), "-overwrite_original", "-m", "-charset", "iptc=UTF8"]
+
+    caption_val = original_caption.strip() if original_caption else ""
+    cmd += [
+        f"-IPTC:Caption-Abstract={caption_val}",
+        f"-XMP:Description={caption_val}",
+    ]
+
+    # Restore keywords — must mirror every field that write_iptc touches
+    if original_keywords:
+        for kw in original_keywords:
+            cmd += [
+                f"-IPTC:Keywords={kw}",
+                f"-XMP-dc:Subject={kw}",
+                f"-XMP-lr:HierarchicalSubject={kw}",
+            ]
+    else:
+        # Delete all keyword fields entirely (empty = clears the list tag)
+        cmd += [
+            "-IPTC:Keywords=",
+            "-XMP-dc:Subject=",
+            "-XMP-lr:HierarchicalSubject=",
+        ]
+
+    cmd.append(str(file_path))
+    subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+    # Remove the XMP sidecar the app created (RAW files only)
+    sidecar = file_path.with_suffix(".xmp")
+    if sidecar.exists():
+        sidecar.unlink(missing_ok=True)
 
 
 def write_xmp_sidecar(

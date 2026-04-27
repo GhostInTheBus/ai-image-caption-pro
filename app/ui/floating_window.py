@@ -8,6 +8,7 @@ Pages (QStackedWidget):
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -46,6 +47,7 @@ class FloatingWindow(QWidget):
         # Staged files waiting for Start button
         self._staged_folder: Optional[Path] = None
         self._staged_files: Optional[list[Path]] = None
+        self._current_batch_id: Optional[str] = None
 
         self._setup_window()
         self._build_ui()
@@ -380,6 +382,7 @@ class FloatingWindow(QWidget):
         self._progress_panel.pause_clicked.connect(self._toggle_pause)
         self._progress_panel.stop_clicked.connect(self._stop_batch)
         self._progress_panel.close_clicked.connect(self._collapse_to_drop_zone)
+        self._progress_panel.undo_clicked.connect(self._undo_batch)
 
         for f in file_list:
             self._progress_panel.add_file(f.name)
@@ -391,10 +394,20 @@ class FloatingWindow(QWidget):
         self._stack.setCurrentIndex(1)
         self.resize(max(self.width(), 360), max(self.height(), 480))
 
+        # Reset batch-in-progress button to running style
+        self._batch_status_btn.setText("⟳  Batch in progress — tap to view")
+        self._batch_status_btn.setStyleSheet(
+            "background: #1e3a5f; color: #89b4fa; border: 1px solid #89b4fa;"
+            "border-radius: 4px; padding: 5px 10px; font-size: 12px;"
+        )
+
+        # Track current batch for undo
+        self._current_batch_id = make_batch_id(folder)
+
         # If force, reset DB state
         if force:
             from app.core.job_db import reset_batch_for_reprocess
-            reset_batch_for_reprocess(make_batch_id(folder))
+            reset_batch_for_reprocess(self._current_batch_id)
 
         # Explicit file list passed so worker doesn't re-scan
         self._worker = BatchWorker(folder=folder, settings=self.settings, files=file_list)
@@ -472,9 +485,53 @@ class FloatingWindow(QWidget):
         if self._thread:
             self._thread.quit()
             self._thread.wait()
-        self._batch_status_btn.setVisible(False)
+        # Keep the button visible so user can return to progress panel (and undo)
+        self._batch_status_btn.setText("✓  Last batch complete — tap to view / undo")
+        self._batch_status_btn.setStyleSheet(
+            "background: #1a3a2a; color: #a6e3a1; border: 1px solid #a6e3a1;"
+            "border-radius: 4px; padding: 5px 10px; font-size: 12px;"
+        )
+        self._batch_status_btn.setVisible(True)
         self.status_changed.emit("Idle")
         self.batch_finished.emit(done, errors)
+
+    # ── Undo ─────────────────────────────────────────────────────────────────
+
+    def _undo_batch(self) -> None:
+        """Restore all files in the current batch to their pre-AI metadata."""
+        if not self._current_batch_id:
+            return
+        from app.core import job_db
+        from app.core.exiftool import restore_iptc
+
+        originals = job_db.get_batch_originals(self._current_batch_id)
+        if not originals:
+            QMessageBox.information(self, "Undo", "No original metadata found for this batch.")
+            return
+
+        # Disable button immediately to prevent double-undo
+        if self._progress_panel:
+            self._progress_panel.undo_btn.setEnabled(False)
+            self._progress_panel.set_status(f"Undoing {len(originals)} file(s)…")
+
+        failed = 0
+        for item in originals:
+            try:
+                restore_iptc(
+                    file_path=Path(item["file_path"]),
+                    original_caption=item["original_caption"] or None,
+                    original_keywords=item["original_keywords"],
+                )
+            except Exception as e:
+                failed += 1
+                print(f"[undo error] {item['file_path']}: {e}", file=sys.stderr)
+
+        if self._progress_panel:
+            restored = len(originals) - failed
+            msg = f"Undone — {restored} file(s) restored."
+            if failed:
+                msg += f"  ({failed} failed — see terminal)"
+            self._progress_panel.set_status(msg)
 
     # ── Settings & log ────────────────────────────────────────────────────────
 
@@ -505,24 +562,76 @@ class FloatingWindow(QWidget):
             msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(msg)
         else:
-            table = QTableWidget(len(batches), 5)
-            table.setHorizontalHeaderLabels(["Folder", "Date", "Done", "Errors", "Skipped"])
+            table = QTableWidget(len(batches), 6)
+            table.setHorizontalHeaderLabels(["Folder", "Date", "Done", "Errors", "Skipped", ""])
             table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
             table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
             for col in (2, 3, 4):
                 table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+            table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
             table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
             table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
             table.verticalHeader().setVisible(False)
             table.setAlternatingRowColors(True)
 
+            def _make_undo_fn(batch_id, folder_path, btn):
+                def do_undo():
+                    reply = QMessageBox.question(
+                        dlg, "Undo Batch?",
+                        f"Restore all files in\n{folder_path}\nto their pre-AI metadata?\n\nThis cannot itself be undone.",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    )
+                    if reply != QMessageBox.StandardButton.Yes:
+                        return
+                    from app.core import job_db as _jdb
+                    from app.core.exiftool import restore_iptc as _restore
+                    originals = _jdb.get_batch_originals(batch_id)
+                    if not originals:
+                        QMessageBox.information(dlg, "Undo", "No original metadata found for this batch.\n(Files may have already been restored.)")
+                        return
+                    btn.setEnabled(False)
+                    btn.setText("…")
+                    failed = 0
+                    for item in originals:
+                        try:
+                            _restore(
+                                file_path=Path(item["file_path"]),
+                                original_caption=item["original_caption"] or None,
+                                original_keywords=item["original_keywords"],
+                            )
+                        except Exception as e:
+                            failed += 1
+                            print(f"[undo error] {item['file_path']}: {e}", file=sys.stderr)
+                    restored = len(originals) - failed
+                    btn.setText("✓ Done")
+                    msg_txt = f"Restored {restored} file(s)."
+                    if failed:
+                        msg_txt += f"\n{failed} failed — see terminal."
+                    QMessageBox.information(dlg, "Undo Complete", msg_txt)
+                    # Sync _current_batch_id so the progress panel undo also reflects state
+                    if self._current_batch_id == batch_id and self._progress_panel:
+                        self._progress_panel.undo_btn.setEnabled(False)
+                        self._progress_panel.set_status(f"Undone from Log — {restored} file(s) restored.")
+                return do_undo
+
             for row, b in enumerate(batches):
                 name = Path(b["folder_path"]).name
                 date = (b["created_at"] or "")[:16]
-                for col, val in enumerate([name, date, str(b["done"] or 0), str(b["errors"] or 0), str(b["skipped"] or 0)]):
+                done_count = b["done"] or 0
+                for col, val in enumerate([name, date, str(done_count), str(b["errors"] or 0), str(b["skipped"] or 0)]):
                     item = QTableWidgetItem(val)
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     table.setItem(row, col, item)
+
+                # Undo button — only useful if there are done files with saved originals
+                undo_btn = QPushButton("↩ Undo")
+                undo_btn.setStyleSheet("color: #f9e2af; padding: 2px 6px;")
+                undo_btn.setToolTip("Restore all files in this batch to their pre-AI metadata")
+                if done_count == 0:
+                    undo_btn.setEnabled(False)
+                    undo_btn.setToolTip("No successfully processed files in this batch")
+                undo_btn.clicked.connect(_make_undo_fn(b["batch_id"], b["folder_path"], undo_btn))
+                table.setCellWidget(row, 5, undo_btn)
 
             layout.addWidget(table)
 

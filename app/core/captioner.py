@@ -458,10 +458,28 @@ def _parse_response(raw: str, max_keywords: int) -> Tuple[str, List[str]]:
     caption = str(data.get("caption", "")).strip()
     if not caption:
         raise ValueError("Empty caption in model response")
+    caption = caption[0].upper() + caption[1:] if len(caption) > 1 else caption.upper()
 
-    raw_kw = data.get("keywords", [])
+    # Accept keywords as array OR comma/newline-separated string
+    raw_kw = (
+        data.get("keywords")
+        or data.get("tags")
+        or data.get("subjects")
+        or data.get("subject")
+        or []
+    )
     if isinstance(raw_kw, str):
-        raw_kw = [raw_kw]
+        # Split on commas or newlines — small models often return a flat string
+        raw_kw = [k.strip() for k in re.split(r"[,\n]+", raw_kw) if k.strip()]
+    elif isinstance(raw_kw, list):
+        # Each element might itself be a comma-separated string (seen in some models)
+        expanded: List[str] = []
+        for item in raw_kw:
+            if isinstance(item, str) and "," in item:
+                expanded.extend(k.strip() for k in item.split(",") if k.strip())
+            else:
+                expanded.append(str(item).strip())
+        raw_kw = expanded
 
     BLOCKED = {"photo", "image", "photography", "picture", "photograph", "camera"}
     keywords: List[str] = []

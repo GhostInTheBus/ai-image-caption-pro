@@ -65,6 +65,12 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_jobs_batch   ON jobs(batch_id);
             CREATE INDEX IF NOT EXISTS idx_jobs_status  ON jobs(status);
         """)
+        # Migrate existing DBs: add undo columns if not present
+        cols = {r[1] for r in con.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "original_caption" not in cols:
+            con.execute("ALTER TABLE jobs ADD COLUMN original_caption TEXT")
+        if "original_keywords" not in cols:
+            con.execute("ALTER TABLE jobs ADD COLUMN original_keywords TEXT")
 
 
 def create_batch(batch: BatchJob, jobs: List[ImageJob]) -> None:
@@ -138,6 +144,35 @@ def is_done(job_id: str) -> bool:
     return row is not None and row["status"] == "done"
 
 
+def save_original_metadata(job_id: str, caption: Optional[str], keywords: List[str]) -> None:
+    """Store pre-write caption and keywords so they can be restored on undo."""
+    import json as _json
+    with _conn() as con:
+        con.execute(
+            "UPDATE jobs SET original_caption=?, original_keywords=? WHERE job_id=?",
+            (caption or "", _json.dumps(keywords), job_id),
+        )
+
+
+def get_batch_originals(batch_id: str) -> List[dict]:
+    """Return file_path + original metadata for all done jobs in a batch."""
+    import json as _json
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT file_path, original_caption, original_keywords "
+            "FROM jobs WHERE batch_id=? AND status='done'",
+            (batch_id,),
+        ).fetchall()
+    result = []
+    for r in rows:
+        result.append({
+            "file_path": r["file_path"],
+            "original_caption": r["original_caption"],
+            "original_keywords": _json.loads(r["original_keywords"] or "[]"),
+        })
+    return result
+
+
 def reset_batch_for_reprocess(batch_id: str) -> int:
     """Reset all done/error jobs in a batch back to pending for reprocessing."""
     with _conn() as con:
@@ -167,6 +202,7 @@ def get_recent_batches(limit: int = 15) -> list[dict]:
     with _conn() as con:
         rows = con.execute("""
             SELECT
+                b.batch_id,
                 b.folder_path,
                 b.created_at,
                 SUM(j.status='done')    AS done,

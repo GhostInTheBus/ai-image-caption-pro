@@ -95,6 +95,10 @@ class Settings:
     instructions: str = ""
     job_identifier: str = ""
 
+    # Accessibility (IPTC Photo Metadata 2021)
+    alt_text: str = ""              # XMP-iptcExt:AltTextAccessibility (defaults to AI caption if blank)
+    extended_description: str = ""  # XMP-iptcExt:ExtDescrAccessibility
+
     # Contact
     contact_email: str = ""
     contact_phone: str = ""
@@ -124,7 +128,8 @@ class Settings:
     context_file: str = ""             # path to a global .md brief (style, gear, voice)
 
     caption_mode: str = "amend"          # "amend" = append to existing | "replace" = overwrite
-    append_separator: str = "\n\n"      # separator when appending AI caption to existing
+    append_separator: str = "\n\n--\n\n"  # separator inserted between original and AI caption
+    caption_ai_label: str = "[ai]"        # suffix appended to AI-generated caption (set blank to disable)
     max_keywords: int = 10              # legacy — now derived from keyword_verbosity internally
     keyword_verbosity: int = 3          # 1=minimal … 5=exhaustive (controls LLM keyword count range)
     description_verbosity: int = 3      # 1=brief … 5=exhaustive (controls LLM sentence count)

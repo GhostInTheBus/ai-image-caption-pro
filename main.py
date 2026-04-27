@@ -15,8 +15,9 @@ from PyQt6.QtCore import QEvent, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
-from app.ui.floating_window import FloatingWindow
+from app.ui.main_window import MainWindow
 from app.ui.tray import TrayIcon
+from app.core.agent import scan_folder
 
 
 class PhotoApp(QApplication):
@@ -46,7 +47,7 @@ def main() -> None:
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 
-    window = FloatingWindow()
+    window = MainWindow()
     window.show()
 
     # Menu bar / tray icon — primary access point so window is never "lost"
@@ -63,7 +64,9 @@ def main() -> None:
     )
 
     # Dock / Finder drops
-    app.folder_opened.connect(window._start_batch)
+    app.folder_opened.connect(
+        lambda path: window._stage_files(path, scan_folder(path, window.settings.recursive_scan))
+    )
 
     sys.exit(app.exec())
 

@@ -79,7 +79,8 @@ class ProgressPanel(QWidget):
 
     pause_clicked = pyqtSignal()
     stop_clicked  = pyqtSignal()
-    close_clicked = pyqtSignal()   # emitted when user clicks "← Back" after batch ends
+    close_clicked = pyqtSignal()
+    undo_clicked  = pyqtSignal()   # emitted when user wants to revert this batch
 
     def __init__(self, folder_name: str, total: int, parent=None):
         super().__init__(parent)
@@ -149,8 +150,16 @@ class ProgressPanel(QWidget):
         self.stop_btn.setStyleSheet("color: #c62828;")
         self.stop_btn.clicked.connect(self.stop_clicked)
 
+        self.undo_btn = QPushButton("↩ Undo")
+        self.undo_btn.setFixedHeight(28)
+        self.undo_btn.setToolTip("Restore all files in this batch to their pre-AI metadata")
+        self.undo_btn.setStyleSheet("color: #f9e2af;")
+        self.undo_btn.setVisible(False)   # shown only after batch completes
+        self.undo_btn.clicked.connect(self.undo_clicked)
+
         btn_row.addWidget(self.back_btn)
         btn_row.addStretch()
+        btn_row.addWidget(self.undo_btn)
         btn_row.addWidget(self.pause_btn)
         btn_row.addWidget(self.stop_btn)
         layout.addLayout(btn_row)
@@ -204,6 +213,8 @@ class ProgressPanel(QWidget):
         self.pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         self.back_btn.setToolTip("Return to drop zone")
+        if done > 0:
+            self.undo_btn.setVisible(True)   # only show if something was actually written
 
     def _ensure_row(self, filename: str) -> FileRow:
         if filename not in self._rows:

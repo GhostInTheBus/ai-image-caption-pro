@@ -210,15 +210,26 @@ class BatchWorker(QObject):
         if folder_brief.exists():
             context_parts.append(folder_brief.read_text(encoding="utf-8"))
         context_md = "\n\n---\n\n".join(context_parts)
+        hint_text = getattr(s, "context_hint", "").strip()
         if context_md:
-            print(f"[context] {job.display_name}: loaded {len(context_md)} chars from {len(context_parts)} source(s)", flush=True)
+            print(f"[context] {job.display_name}: loaded {len(context_md)} chars from {len(context_parts)} file source(s)", flush=True)
+        elif hint_text:
+            print(f"[context] {job.display_name}: using context hint ({len(hint_text)} chars)", flush=True)
         else:
-            print(f"[context] {job.display_name}: no context brief found", flush=True)
+            print(f"[context] {job.display_name}: no context brief or hint — captioning from image only", flush=True)
 
         caption, keywords = generate_caption(
             image_path=preview_path, settings=s, context_md=context_md
         )
+        print(
+            f"[caption] {job.display_name}: {len(caption)} chars | "
+            f"{len(keywords)} keywords: {keywords}",
+            flush=True,
+        )
         self.status_msg.emit(f"[4/4] Writing metadata — {job.display_name}")
+
+        # Save original metadata to DB before overwriting — enables undo
+        job_db.save_original_metadata(job.job_id, existing_caption, existing_keywords)
 
         # Step 4: write IPTC to original file
         amend = getattr(s, "caption_mode", "amend") == "amend"
@@ -227,9 +238,9 @@ class BatchWorker(QObject):
             copyright_notice=s.copyright_year_notice(),
             credit_line=s.credit_line,
             headline=s.headline,
-            source=s.source,
-            instructions=s.instructions,
             job_identifier=s.job_identifier,
+            alt_text=getattr(s, "alt_text", ""),
+            extended_description=getattr(s, "extended_description", ""),
             city=s.default_city,
             state_province=s.default_state_province,
             sublocation=s.default_sublocation,
@@ -239,6 +250,7 @@ class BatchWorker(QObject):
             contact_phone=s.contact_phone,
             contact_url=s.contact_url,
             append_separator=s.append_separator,
+            ai_label=getattr(s, "caption_ai_label", "[ai]"),
         )
 
         exiftool.write_iptc(
@@ -265,10 +277,12 @@ class BatchWorker(QObject):
             or verified.get("IPTC:Keywords")
             or verified.get("Subject")
             or verified.get("XMP:Subject")
+            or verified.get("XMP-dc:Subject")
             or []
         )
         if isinstance(written_kw, str):
             written_kw = [written_kw]
+        print(f"[verify] {job.display_name}: wrote {len(written_kw)} keywords to file", flush=True)
         if not written_caption.strip() and not written_kw:
             raise RuntimeError(
                 f"exiftool reported success but no caption or keywords found in "
