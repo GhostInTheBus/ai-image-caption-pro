@@ -196,6 +196,14 @@ class QuickSettingsPanel(QWidget):
         layout.addWidget(sep3)
 
         # ── Behaviour checkboxes ──────────────────────────────────────
+        self._append_check = QCheckBox("Append to existing captions")
+        self._append_check.setToolTip(
+            "Checked: AI caption is appended after any existing caption.\n"
+            "Unchecked: AI caption replaces the existing caption."
+        )
+        self._append_check.setChecked(getattr(s, "caption_mode", "amend") == "amend")
+        layout.addWidget(self._append_check)
+
         self._recursive_check = QCheckBox("Scan subfolders recursively")
         self._recursive_check.setChecked(s.recursive_scan)
         layout.addWidget(self._recursive_check)
@@ -214,6 +222,7 @@ class QuickSettingsPanel(QWidget):
         self._desc_slider.valueChanged.connect(self._on_any_change)
         self._context_edit.textChanged.connect(self._on_any_change)
         self._seeds_edit.textChanged.connect(self._on_any_change)
+        self._append_check.stateChanged.connect(self._on_any_change)
         self._recursive_check.stateChanged.connect(self._on_any_change)
         self._skip_done_check.stateChanged.connect(self._on_any_change)
 
@@ -263,6 +272,7 @@ class QuickSettingsPanel(QWidget):
         self._desc_slider.setValue(getattr(settings, "description_verbosity", 3))
         self._context_edit.setPlainText(settings.context_hint)
         self._seeds_edit.setText(getattr(settings, "user_keywords", ""))
+        self._append_check.setChecked(getattr(settings, "caption_mode", "amend") == "amend")
         self._recursive_check.setChecked(settings.recursive_scan)
         self._skip_done_check.setChecked(settings.skip_already_done)
         self._updating = False
@@ -309,6 +319,7 @@ class QuickSettingsPanel(QWidget):
         s.description_verbosity = self._desc_slider.value()
         s.context_hint          = self._context_edit.toPlainText().strip()
         s.user_keywords         = self._seeds_edit.text().strip()
+        s.caption_mode          = "amend" if self._append_check.isChecked() else "replace"
         s.recursive_scan        = self._recursive_check.isChecked()
         s.skip_already_done     = self._skip_done_check.isChecked()
         return s

@@ -12,7 +12,7 @@ Drop a folder of RAW, JPEG, or PSD images onto the window. The app sends each ph
 
 | Backend | Setup |
 |---|---|
-| **Ollama** (local, no API key) | `brew install ollama && ollama pull gemma3:12b` |
+| **Ollama** (local, no API key) | `brew install ollama && ollama pull qwen2.5vl:7b` |
 | **Google Gemini** | API key from [aistudio.google.com](https://aistudio.google.com) |
 | **Anthropic Claude** | API key from [console.anthropic.com](https://console.anthropic.com) |
 | **OpenAI GPT-4o** | API key from [platform.openai.com](https://platform.openai.com) |
@@ -60,3 +60,5 @@ Drop a `context.md` into any shoot folder and the app includes it in every capti
 - Python 3.11+
 - ExifTool (`brew install exiftool` / `apt install libimage-exiftool-perl`)
 - Ollama (optional — only for local AI backend)
+
+Recommended local models: `qwen2.5vl:7b`, `minicpm-v` — both are strong vision models optimised for image understanding at modest hardware requirements.
